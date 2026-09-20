@@ -1,0 +1,4 @@
+import Link from 'next/link';
+import { getActorContext } from '@/lib/auth';
+import { getGroup } from '@/lib/domain/group';
+export default async function GroupPage({params}:{params:Promise<{tripId:string}>}){const a=await getActorContext();const {tripId}=await params;const group=await getGroup(tripId,a.tenantId);return <main className="shell"><Link href={`/trips/${tripId}`}>← Trip Wallet</Link><section className="hero"><h1>Group Travel</h1><p className="muted">Participants do not inherit edit, spend, booking or action authority.</p></section><div className="card">{group?<div className="list">{group.participants.map((p:any)=><div className="row" key={p.travelerId}><span>{p.travelerId}</span><span className="pill">{p.role}</span></div>)}</div>:<p className="muted">No group created yet.</p>}</div></main>}

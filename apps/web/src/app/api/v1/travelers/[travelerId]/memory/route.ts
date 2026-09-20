@@ -1,0 +1,2 @@
+import {actor,safe} from '@/lib/route';import {ok} from '@/lib/http';
+export async function GET(_:Request,{params}:{params:Promise<{travelerId:string}>}){return safe(async()=>{const a=await actor();const {travelerId}=await params;if(travelerId!==a.travelerId)throw new Error('FORBIDDEN');const prefs=await import('@/lib/domain/preferences').then(m=>m.getTravelerPreferences(travelerId,a.tenantId));return ok({durable_preferences:prefs,memory_status:'TRAVEL_MEMORY_NOT_YET_AUTOMATICALLY_LEARNED'})})}

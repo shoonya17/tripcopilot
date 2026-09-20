@@ -1,0 +1,4 @@
+'use client';
+import { useEffect, useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+export default function ProcessingPage(){const params=useParams<{ingestionId:string}>();const router=useRouter();const [state,setState]=useState('RECEIVED');useEffect(()=>{let stop=false;async function tick(){const r=await fetch('/api/v1/ingestion/'+params.ingestionId);if(!r.ok)return;const j=await r.json();const s=j.data?.productState??'RECEIVED';if(!stop)setState(s);if(s==='CONFIRMED'&&j.data?.tripId)router.replace('/trips/'+j.data.tripId)}tick();const id=setInterval(tick,1500);return()=>{stop=true;clearInterval(id)}},[params.ingestionId,router]);return <main className="shell"><div className="card"><h1>Understanding your trip</h1><p className="muted">Current state: <strong>{state}</strong></p><p className="small muted">Source evidence is preserved. Canonical truth is committed only after validation and deduplication.</p></div></main>}

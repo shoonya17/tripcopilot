@@ -1,0 +1,2 @@
+import { actor } from '@/lib/route';import { renderCalendar } from '@/lib/domain/calendar';import { errorResponse } from '@/lib/http';
+export async function GET(_:Request,{params}:{params:Promise<{tripId:string}>}){try{const a=await actor();const {tripId}=await params;const ics=await renderCalendar(tripId,a.tenantId);return new Response(ics,{status:200,headers:{'content-type':'text/calendar; charset=utf-8','content-disposition':`attachment; filename="trip-${tripId}.ics"`}})}catch(e){return errorResponse(e)}}

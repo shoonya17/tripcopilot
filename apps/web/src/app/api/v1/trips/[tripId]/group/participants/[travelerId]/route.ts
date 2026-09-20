@@ -1,0 +1,2 @@
+import {NextRequest} from 'next/server';import {actor,safe} from '@/lib/route';import {ok} from '@/lib/http';import {removeParticipant} from '@/lib/domain/group';
+export async function DELETE(_:NextRequest,{params}:{params:Promise<{tripId:string;travelerId:string}>}){return safe(async()=>{const a=await actor();const p=await params;return ok(await removeParticipant(p.tripId,a.tenantId,a.travelerId,p.travelerId))})}

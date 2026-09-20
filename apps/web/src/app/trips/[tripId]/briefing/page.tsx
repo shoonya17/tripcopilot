@@ -1,0 +1,4 @@
+import Link from 'next/link';
+import { getActorContext } from '@/lib/auth';
+import { viewBriefing } from '@/lib/domain/briefing';
+export default async function BriefingPage({params}:{params:Promise<{tripId:string}>}){const a=await getActorContext();const {tripId}=await params;const b=await viewBriefing(tripId,a.tenantId,a.actorId,'morning');const content=b.content as any;return <main className="shell"><Link href={`/trips/${tripId}`}>← Trip Wallet</Link><section className="hero"><p className="small muted">DAILY BRIEFING</p><h1>{new Date(b.travelDate).toLocaleDateString()}</h1></section><div className="grid grid-2">{['TODAY','TOMORROW','READY_FOR_NEXT_STOP','ONE_THING_YOU_DIDNT_KNOW','SAFETY_BRIEF'].map(k=><article className="card" key={k}><h2 className="section-title">{k.replaceAll('_',' ')}</h2><p className="muted" style={{whiteSpace:'pre-wrap'}}>{content?.[k] ?? 'No briefing content available.'}</p></article>)}</div></main>}

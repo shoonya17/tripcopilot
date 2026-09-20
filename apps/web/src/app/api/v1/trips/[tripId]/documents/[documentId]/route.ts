@@ -1,0 +1,3 @@
+import { NextRequest } from 'next/server';import {actor,safe} from '@/lib/route';import {ok} from '@/lib/http';import {getDocument,deleteDocument} from '@/lib/domain/documents';
+export async function GET(_:NextRequest,{params}:{params:Promise<{tripId:string;documentId:string}>}){return safe(async()=>{const a=await actor();const p=await params;return ok(await getDocument(p.tripId,p.documentId,a.tenantId))})}
+export async function DELETE(_:NextRequest,{params}:{params:Promise<{tripId:string;documentId:string}>}){return safe(async()=>{const a=await actor();const p=await params;return ok(await deleteDocument(p.tripId,p.documentId,a.tenantId))})}

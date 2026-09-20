@@ -1,0 +1,579 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TripStatus { PLANNED ACTIVE COMPLETED CANCELLED ARCHIVED }
+enum SegmentStatus { BOOKED CONFIRMED CHANGED CANCELLED COMPLETED UNKNOWN }
+enum ConflictStatus { DETECTED REVIEWED RESOLVED }
+enum ConsentStatus { PENDING GRANTED WITHDRAWN }
+enum IngestionProductState { RECEIVED PARSING EXTRACTED REVIEW_REQUIRED CONFIRMED PARSE_FAILED }
+enum IngestionImplementationState { RECEIVED AUTHORIZED SECURITY_CHECK PARSING EXTRACTED VALIDATED COMMITTED }
+enum ValidationResult { VALID REVIEW_REQUIRED REJECTED }
+enum DedupResult { NEW DUPLICATE_ABSORBED AMBIGUOUS_REVIEW }
+enum ActorType { USER SYSTEM SUPPORT }
+enum GroupRole { OWNER PARTICIPANT }
+enum DocumentRetentionState { ACTIVE PENDING_DELETION RETAINED DELETED QUARANTINED }
+enum ConsentType { INGESTION SAFETY LOCATION BRIEFING_GROUP CHANNEL_BINDING }
+enum Channel { EMAIL WHATSAPP PDF TEXT MANUAL }
+
+model Traveler {
+  travelerId       String          @id @default(uuid()) @db.Uuid @map("traveler_id")
+  tenantId         String          @db.Uuid @map("tenant_id")
+  authSubject      String?         @unique @map("auth_subject")
+  displayName      String?         @map("display_name")
+  email            String?
+  phone            String?
+  locale           String?
+  defaultTimezone  String?         @map("default_timezone")
+  createdAt        DateTime        @default(now()) @map("created_at")
+  updatedAt        DateTime        @updatedAt @map("updated_at")
+  rowVersion       Int             @default(1) @map("row_version")
+  tripsOwned       Trip[]          @relation("TripOwner")
+  groupTripsOwned  GroupTrip[]     @relation("GroupOwner")
+  participants     GroupParticipant[]
+  trustedContacts  TrustedContact[]
+  safetyCheckins   SafetyCheckin[]
+  expenses         Expense[]
+  travelerPrefs    PreferenceSet[] @relation("TravelerPreferences")
+  consents         Consent[]
+  ingestions       IngestionRecord[]
+  channelBindings  ChannelBinding[]
+
+  @@index([tenantId])
+  @@index([tenantId, email])
+  @@index([tenantId, phone])
+  @@map("traveler")
+}
+
+model Trip {
+  tripId                 String          @id @default(uuid()) @db.Uuid @map("trip_id")
+  tenantId               String          @db.Uuid @map("tenant_id")
+  ownerTravelerId        String          @db.Uuid @map("owner_traveler_id")
+  title                  String?
+  status                 TripStatus      @default(PLANNED)
+  startAt                DateTime?       @map("start_at")
+  endAt                  DateTime?       @map("end_at")
+  startTimezone          String?         @map("start_timezone")
+  endTimezone            String?         @map("end_timezone")
+  lastBriefingGeneratedAt DateTime?      @map("last_briefing_generated_at")
+  createdAt              DateTime        @default(now()) @map("created_at")
+  updatedAt              DateTime        @updatedAt @map("updated_at")
+  rowVersion             Int             @default(1) @map("row_version")
+  owner                  Traveler        @relation("TripOwner", fields: [ownerTravelerId], references: [travelerId])
+  segments               Segment[]
+  documents              Document[]
+  budgets                Budget[]
+  expenses               Expense[]
+  preferences            PreferenceSet[] @relation("TripPreferences")
+  conflicts              Conflict[]
+  group                  GroupTrip?
+  consents               Consent[]
+  safetyCheckins         SafetyCheckin[]
+  briefings              BriefingGeneration[]
+  notifications          NotificationDelivery[]
+  events                 EventLog[]
+  audits                 AuditLog[]
+  referrals              ReferralClick[]
+  ingestions             IngestionRecord[]
+
+  @@index([tenantId, ownerTravelerId, status])
+  @@index([tenantId, startAt, endAt])
+  @@map("trip")
+}
+
+model GroupTrip {
+  groupTripId       String             @id @default(uuid()) @db.Uuid @map("group_trip_id")
+  tenantId          String             @db.Uuid @map("tenant_id")
+  tripId            String             @unique @db.Uuid @map("trip_id")
+  ownerTravelerId   String             @db.Uuid @map("owner_traveler_id")
+  name              String?
+  status            String
+  createdAt         DateTime           @default(now()) @map("created_at")
+  updatedAt         DateTime           @updatedAt @map("updated_at")
+  rowVersion        Int                @default(1) @map("row_version")
+  trip              Trip               @relation(fields: [tripId], references: [tripId], onDelete: Cascade)
+  owner             Traveler           @relation("GroupOwner", fields: [ownerTravelerId], references: [travelerId])
+  participants      GroupParticipant[]
+  expenses          Expense[]
+
+  @@index([tenantId, tripId])
+  @@map("group_trip")
+}
+
+model GroupParticipant {
+  groupTripId String    @db.Uuid @map("group_trip_id")
+  travelerId  String    @db.Uuid @map("traveler_id")
+  role        GroupRole @default(PARTICIPANT)
+  status      String
+  joinedAt    DateTime  @default(now()) @map("joined_at")
+  leftAt      DateTime? @map("left_at")
+  groupTrip   GroupTrip @relation(fields: [groupTripId], references: [groupTripId], onDelete: Cascade)
+  traveler    Traveler  @relation(fields: [travelerId], references: [travelerId], onDelete: Cascade)
+
+  @@id([groupTripId, travelerId])
+  @@map("group_trip_participant")
+}
+
+model TrustedContact {
+  trustedContactId String   @id @default(uuid()) @db.Uuid @map("trusted_contact_id")
+  tenantId         String   @db.Uuid @map("tenant_id")
+  travelerId       String   @db.Uuid @map("traveler_id")
+  name             String
+  contactValue     String   @map("contact_value")
+  contactType      String   @map("contact_type")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+  rowVersion       Int      @default(1) @map("row_version")
+  traveler         Traveler @relation(fields: [travelerId], references: [travelerId])
+
+  @@index([tenantId, travelerId])
+  @@map("trusted_contact")
+}
+
+model SafetyCheckin {
+  safetyCheckinId    String   @id @default(uuid()) @db.Uuid @map("safety_checkin_id")
+  tenantId           String   @db.Uuid @map("tenant_id")
+  tripId             String   @db.Uuid @map("trip_id")
+  travelerId         String   @db.Uuid @map("traveler_id")
+  sharedAt           DateTime @map("shared_at")
+  locationLat        Decimal? @map("location_lat") @db.Decimal(9,6)
+  locationLong       Decimal? @map("location_long") @db.Decimal(9,6)
+  locationAccuracyM  Decimal? @map("location_accuracy_m") @db.Decimal(10,2)
+  consentReference   String?  @db.Uuid @map("consent_reference")
+  createdAt          DateTime @default(now()) @map("created_at")
+  trip               Trip     @relation(fields: [tripId], references: [tripId], onDelete: Cascade)
+  traveler           Traveler @relation(fields: [travelerId], references: [travelerId])
+
+  @@index([tenantId, tripId, sharedAt])
+  @@map("safety_checkin")
+}
+
+model Segment {
+  segmentId          String       @id @default(uuid()) @db.Uuid @map("segment_id")
+  tenantId           String       @db.Uuid @map("tenant_id")
+  tripId             String       @db.Uuid @map("trip_id")
+  segmentType        String       @map("segment_type")
+  supplierName       String?      @map("supplier_name")
+  bookingReference   String?      @map("booking_reference")
+  departureLocal     DateTime?    @map("departure_local") @db.Timestamp(6)
+  departureTimezone  String?      @map("departure_timezone")
+  departureUtc       DateTime?    @map("departure_utc")
+  arrivalLocal       DateTime?    @map("arrival_local") @db.Timestamp(6)
+  arrivalTimezone    String?      @map("arrival_timezone")
+  arrivalUtc         DateTime?    @map("arrival_utc")
+  departureLocation  String?      @map("departure_location")
+  arrivalLocation    String?      @map("arrival_location")
+  status             SegmentStatus @default(UNKNOWN)
+  travelerReference  String?      @map("traveler_reference")
+  createdAt          DateTime     @default(now()) @map("created_at")
+  updatedAt          DateTime     @updatedAt @map("updated_at")
+  rowVersion         Int          @default(1) @map("row_version")
+  trip               Trip         @relation(fields: [tripId], references: [tripId], onDelete: Cascade)
+  connectionsFrom    Connection[] @relation("ConnectionFrom")
+  connectionsTo      Connection[] @relation("ConnectionTo")
+  documents          Document[]
+
+  @@index([tenantId, tripId, departureUtc])
+  @@index([tenantId, tripId, status])
+  @@index([tenantId, supplierName, bookingReference])
+  @@map("segment")
+}
+
+model Connection {
+  connectionId  String   @id @default(uuid()) @db.Uuid @map("connection_id")
+  tenantId      String   @db.Uuid @map("tenant_id")
+  tripId        String   @db.Uuid @map("trip_id")
+  fromSegmentId String   @db.Uuid @map("from_segment_id")
+  toSegmentId   String   @db.Uuid @map("to_segment_id")
+  connectionType String? @map("connection_type")
+  isInferred    Boolean  @map("is_inferred")
+  confidence    Decimal? @db.Decimal(5,4)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  rowVersion    Int      @default(1) @map("row_version")
+  trip          Trip     @relation(fields: [tripId], references: [tripId], onDelete: Cascade)
+  fromSegment   Segment  @relation("ConnectionFrom", fields: [fromSegmentId], references: [segmentId])
+  toSegment     Segment  @relation("ConnectionTo", fields: [toSegmentId], references: [segmentId])
+
+  @@index([tenantId, tripId])
+  @@map("connection")
+}
+
+model Document {
+  documentId      String                   @id @default(uuid()) @db.Uuid @map("document_id")
+  tenantId        String                   @db.Uuid @map("tenant_id")
+  tripId          String?                  @db.Uuid @map("trip_id")
+  segmentId       String?                  @db.Uuid @map("segment_id")
+  sourceType      String                   @map("source_type")
+  sourceReference String?                  @map("source_reference")
+  storageObjectKey String                  @map("storage_object_key")
+  receivedAt      DateTime                 @map("received_at")
+  contentHash     String                   @map("content_hash")
+  version         Int
+  retentionState  DocumentRetentionState   @map("retention_state")
+  securityState   String                   @map("security_state")
+  legalHold       Boolean                  @default(false) @map("legal_hold")
+  legalHoldReason String?                  @map("legal_hold_reason")
+  legalHoldAt     DateTime?                @map("legal_hold_at")
+  supplierName    String?                  @map("supplier_name")
+  bookingReference String?                 @map("booking_reference")
+  createdAt       DateTime                 @default(now()) @map("created_at")
+  updatedAt       DateTime                 @updatedAt @map("updated_at")
+  rowVersion      Int                      @default(1) @map("row_version")
+  trip            Trip?                    @relation(fields: [tripId], references: [tripId])
+  segment         Segment?                 @relation(fields: [segmentId], references: [segmentId])
+  ingestion       IngestionRecord[]
+
+  @@unique([tenantId, contentHash, version])
+  @@index([tenantId, tripId, retentionState])
+  @@map("document")
+}
+
+model Budget {
+  budgetId      String   @id @default(uuid()) @db.Uuid @map("budget_id")
+  tenantId      String   @db.Uuid @map("tenant_id")
+  tripId        String   @db.Uuid @map("trip_id")
+  currency      String   @db.Char(3)
+  plannedAmount Decimal  @map("planned_amount") @db.Decimal(19,4)
+  category      String?
+  notes         String?
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  rowVersion    Int      @default(1) @map("row_version")
+  trip          Trip     @relation(fields: [tripId], references: [tripId], onDelete: Cascade)
+
+  @@index([tenantId, tripId])
+  @@map("budget")
+}
+
+model Expense {
+  expenseId           String       @id @default(uuid()) @db.Uuid @map("expense_id")
+  tenantId            String       @db.Uuid @map("tenant_id")
+  tripId              String       @db.Uuid @map("trip_id")
+  travelerId          String?      @db.Uuid @map("traveler_id")
+  groupTripId         String?      @db.Uuid @map("group_trip_id")
+  amount              Decimal      @db.Decimal(19,4)
+  currency            String       @db.Char(3)
+  category            String?
+  merchantOrDescription String     @map("merchant_or_description")
+  incurredAt          DateTime     @map("incurred_at")
+  location            String?
+  source              String
+  sourceType          String       @map("source_type")
+  confidence          Decimal?     @db.Decimal(5,4)
+  userConfirmed       Boolean      @default(false) @map("user_confirmed")
+  confirmedAt         DateTime?    @map("confirmed_at")
+  createdAt           DateTime     @default(now()) @map("created_at")
+  updatedAt           DateTime     @updatedAt @map("updated_at")
+  rowVersion          Int          @default(1) @map("row_version")
+  trip                Trip         @relation(fields: [tripId], references: [tripId], onDelete: Cascade)
+  traveler            Traveler?    @relation(fields: [travelerId], references: [travelerId])
+  groupTrip           GroupTrip?   @relation(fields: [groupTripId], references: [groupTripId])
+
+  @@index([tenantId, tripId, incurredAt])
+  @@index([tenantId, tripId, category])
+  @@map("expense")
+}
+
+model PreferenceSet {
+  preferenceSetId String   @id @default(uuid()) @db.Uuid @map("preference_set_id")
+  tenantId        String   @db.Uuid @map("tenant_id")
+  scope           String
+  travelerId      String?  @db.Uuid @map("traveler_id")
+  tripId          String?  @db.Uuid @map("trip_id")
+  preferenceKey   String   @map("preference_key")
+  preferenceValue Json     @map("preference_value")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  rowVersion      Int      @default(1) @map("row_version")
+  traveler        Traveler? @relation("TravelerPreferences", fields: [travelerId], references: [travelerId])
+  trip            Trip?     @relation("TripPreferences", fields: [tripId], references: [tripId], onDelete: Cascade)
+
+  @@index([tenantId, travelerId, scope])
+  @@index([tenantId, tripId, scope])
+  @@map("preference_set")
+}
+
+model Conflict {
+  conflictId   String         @id @default(uuid()) @db.Uuid @map("conflict_id")
+  tenantId     String         @db.Uuid @map("tenant_id")
+  tripId       String         @db.Uuid @map("trip_id")
+  conflictType String         @map("conflict_type")
+  status       ConflictStatus @default(DETECTED)
+  description  String
+  evidence     Json
+  suppressionKey String?      @map("suppression_key")
+  entityType   String?        @map("entity_type")
+  entityId     String?        @db.Uuid @map("entity_id")
+  summary      String
+  details      Json?
+  detectedAt   DateTime       @default(now()) @map("detected_at")
+  reviewedAt   DateTime?      @map("reviewed_at")
+  resolvedAt   DateTime?      @map("resolved_at")
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+  rowVersion   Int            @default(1) @map("row_version")
+  trip         Trip           @relation(fields: [tripId], references: [tripId], onDelete: Cascade)
+
+  @@index([tenantId, tripId, status])
+  @@map("conflict")
+}
+
+model Consent {
+  consentId    String       @id @default(uuid()) @db.Uuid @map("consent_id")
+  tenantId     String       @db.Uuid @map("tenant_id")
+  travelerId   String       @db.Uuid @map("traveler_id")
+  tripId       String?      @db.Uuid @map("trip_id")
+  consentType  ConsentType  @map("consent_type")
+  status       ConsentStatus @default(PENDING)
+  grantedAt    DateTime?    @map("granted_at")
+  withdrawnAt  DateTime?    @map("withdrawn_at")
+  metadata     Json?
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+  traveler     Traveler    @relation(fields: [travelerId], references: [travelerId])
+  trip         Trip?       @relation(fields: [tripId], references: [tripId], onDelete: Cascade)
+
+  @@index([tenantId, travelerId, consentType, status])
+  @@map("consent")
+}
+
+model FieldProvenance {
+  provenanceId      String   @id @default(uuid()) @db.Uuid @map("provenance_id")
+  tenantId          String   @db.Uuid @map("tenant_id")
+  entityType        String   @map("entity_type")
+  entityId          String   @db.Uuid @map("entity_id")
+  fieldName         String   @map("field_name")
+  sourceKind        String   @map("source_kind")
+  sourceId          String?  @map("source_id")
+  sourceVersion     Int?     @map("source_version")
+  sourceExcerpt     String?  @map("source_excerpt")
+  extractedBy       String?  @map("extracted_by")
+  confidence        Decimal? @db.Decimal(5,4)
+  isUserOriginated  Boolean  @default(false) @map("is_user_originated")
+  userActorId       String?  @db.Uuid @map("user_actor_id")
+  recordedAt        DateTime @default(now()) @map("recorded_at")
+
+  @@index([tenantId, entityType, entityId, fieldName])
+  @@map("field_provenance")
+}
+
+model IngestionRecord {
+  ingestionId            String                    @id @default(uuid()) @db.Uuid @map("ingestion_id")
+  tenantId               String                    @db.Uuid @map("tenant_id")
+  travelerId             String?                   @db.Uuid @map("traveler_id")
+  channel                Channel
+  sourceReference        String?                   @map("source_reference")
+  receivedAt             DateTime                  @map("received_at")
+  productState           IngestionProductState     @map("product_state")
+  securityState          String                    @map("security_state")
+  implementationState    IngestionImplementationState @map("implementation_state")
+  contentHash            String?                   @map("content_hash")
+  documentId             String?                   @db.Uuid @map("document_id")
+  tripId                 String?                   @db.Uuid @map("trip_id")
+  parseAttemptCount      Int                       @default(0) @map("parse_attempt_count")
+  lastErrorCode          String?                   @map("last_error_code")
+  lastErrorMessage       String?                   @map("last_error_message")
+  createdAt              DateTime                  @default(now()) @map("created_at")
+  updatedAt              DateTime                  @updatedAt @map("updated_at")
+  idempotencyKey         String                    @map("idempotency_key")
+  rawText                String?                   @map("raw_text")
+  traveler               Traveler?                 @relation(fields: [travelerId], references: [travelerId])
+  document              Document?                 @relation(fields: [documentId], references: [documentId])
+  trip                  Trip?                     @relation(fields: [tripId], references: [tripId])
+  candidates            SourceCandidate[]
+  validations           ValidationResultRecord[]
+  dedupDecisions        DedupDecision[]
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, receivedAt])
+  @@index([tenantId, productState])
+  @@map("ingestion_record")
+}
+
+model SourceCandidate {
+  candidateId       String          @id @default(uuid()) @db.Uuid @map("candidate_id")
+  tenantId         String          @db.Uuid @map("tenant_id")
+  ingestionId      String          @db.Uuid @map("ingestion_id")
+  entityType       String          @map("entity_type")
+  fieldName        String          @map("field_name")
+  candidateValue   Json            @map("candidate_value")
+  normalizedValue  Json?           @map("normalized_value")
+  confidence       Decimal         @db.Decimal(5,4)
+  sourceLocation   Json?           @map("source_location")
+  sourceExcerpt    String?         @map("source_excerpt")
+  extractionMethod String          @map("extraction_method")
+  extractedAt      DateTime        @map("extracted_at")
+  createdAt        DateTime        @default(now()) @map("created_at")
+  ingestion        IngestionRecord @relation(fields: [ingestionId], references: [ingestionId], onDelete: Cascade)
+
+  @@index([tenantId, ingestionId])
+  @@map("source_candidate")
+}
+
+model ValidationResultRecord {
+  validationId String          @id @default(uuid()) @db.Uuid @map("validation_id")
+  tenantId     String          @db.Uuid @map("tenant_id")
+  ingestionId  String          @db.Uuid @map("ingestion_id")
+  result       ValidationResult
+  issues       Json
+  createdAt    DateTime        @default(now()) @map("created_at")
+  ingestion    IngestionRecord @relation(fields: [ingestionId], references: [ingestionId], onDelete: Cascade)
+
+  @@index([tenantId, ingestionId])
+  @@map("validation_result")
+}
+
+model DedupDecision {
+  dedupDecisionId  String          @id @default(uuid()) @db.Uuid @map("dedup_decision_id")
+  tenantId         String          @db.Uuid @map("tenant_id")
+  ingestionId      String          @db.Uuid @map("ingestion_id")
+  result           DedupResult
+  matchedEntityType String?        @map("matched_entity_type")
+  matchedEntityId  String?          @db.Uuid @map("matched_entity_id")
+  rationale        String?
+  createdAt        DateTime        @default(now()) @map("created_at")
+  ingestion        IngestionRecord @relation(fields: [ingestionId], references: [ingestionId], onDelete: Cascade)
+
+  @@index([tenantId, ingestionId])
+  @@map("dedup_decision")
+}
+
+model EventLog {
+  eventId         String     @id @default(uuid()) @db.Uuid @map("event_id")
+  tenantId        String     @db.Uuid @map("tenant_id")
+  tripId          String?    @db.Uuid @map("trip_id")
+  eventName       String     @map("event_name")
+  behavioralClass String?    @map("behavioral_class")
+  actorType       ActorType  @map("actor_type")
+  actorId         String?    @db.Uuid @map("actor_id")
+  payload         Json
+  occurredAt      DateTime   @map("occurred_at")
+  createdAt       DateTime   @default(now()) @map("created_at")
+  trip            Trip?      @relation(fields: [tripId], references: [tripId], onDelete: Cascade)
+
+  @@index([tenantId, tripId, occurredAt])
+  @@index([tenantId, eventName, occurredAt])
+  @@map("event_log")
+}
+
+model OutboxEvent {
+  outboxId     String   @id @default(uuid()) @db.Uuid @map("outbox_id")
+  eventId      String   @unique @db.Uuid @map("event_id")
+  tenantId     String   @db.Uuid @map("tenant_id")
+  eventName    String   @map("event_name")
+  payload      Json
+  availableAt  DateTime @map("available_at")
+  publishedAt  DateTime? @map("published_at")
+  attemptCount Int      @default(0) @map("attempt_count")
+  lastError    String?  @map("last_error")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([publishedAt, availableAt, createdAt])
+  @@map("outbox_event")
+}
+
+model IdempotencyRecord {
+  idempotencyId String   @id @default(uuid()) @db.Uuid @map("idempotency_id")
+  tenantId     String   @db.Uuid @map("tenant_id")
+  key          String
+  requestHash  String   @map("request_hash")
+  responseJson Json     @map("response_json")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, key])
+  @@index([tenantId, createdAt])
+  @@map("idempotency_record")
+}
+
+model BriefingGeneration {
+  briefingGenerationId String   @id @default(uuid()) @db.Uuid @map("briefing_generation_id")
+  tenantId            String   @db.Uuid @map("tenant_id")
+  tripId              String   @db.Uuid @map("trip_id")
+  travelDate          DateTime @map("travel_date")
+  content             Json
+  generatedAt         DateTime @map("generated_at")
+  generationKey       String   @unique @map("generation_key")
+  model               String?
+  policyVersion       String?  @map("policy_version")
+  trip                Trip     @relation(fields: [tripId], references: [tripId], onDelete: Cascade)
+  notifications       NotificationDelivery[]
+
+  @@index([tenantId, tripId, travelDate])
+  @@map("briefing_generation")
+}
+
+model NotificationDelivery {
+  notificationDeliveryId String              @id @default(uuid()) @db.Uuid @map("notification_delivery_id")
+  tenantId               String              @db.Uuid @map("tenant_id")
+  tripId                 String              @db.Uuid @map("trip_id")
+  briefingGenerationId   String?             @db.Uuid @map("briefing_generation_id")
+  category               String
+  channel                String
+  deliveryKey            String              @unique @map("delivery_key")
+  status                 String
+  attemptedAt            DateTime?           @map("attempted_at")
+  deliveredAt            DateTime?           @map("delivered_at")
+  errorCode              String?             @map("error_code")
+  errorMessage           String?             @map("error_message")
+  trip                   Trip                @relation(fields: [tripId], references: [tripId], onDelete: Cascade)
+  briefingGeneration    BriefingGeneration? @relation(fields: [briefingGenerationId], references: [briefingGenerationId])
+
+  @@index([tenantId, tripId, attemptedAt])
+  @@map("notification_delivery")
+}
+
+model AuditLog {
+  auditId    String     @id @default(uuid()) @db.Uuid @map("audit_id")
+  tenantId   String     @db.Uuid @map("tenant_id")
+  tripId     String?    @db.Uuid @map("trip_id")
+  actorType  ActorType  @map("actor_type")
+  actorId    String?    @db.Uuid @map("actor_id")
+  action     String
+  entityType String?    @map("entity_type")
+  entityId   String?    @db.Uuid @map("entity_id")
+  metadata   Json?
+  createdAt  DateTime   @default(now()) @map("created_at")
+  trip       Trip?      @relation(fields: [tripId], references: [tripId], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@map("audit_log")
+}
+
+model ReferralClick {
+  referralClickId String   @id @default(uuid()) @db.Uuid @map("referral_click_id")
+  tenantId       String   @db.Uuid @map("tenant_id")
+  tripId         String   @db.Uuid @map("trip_id")
+  referralType   String   @map("referral_type")
+  provider       String
+  destination    String
+  disclosed      Boolean  @default(true)
+  clickedAt      DateTime @default(now()) @map("clicked_at")
+  trip           Trip     @relation(fields: [tripId], references: [tripId], onDelete: Cascade)
+
+  @@index([tenantId, tripId, clickedAt])
+  @@map("referral_click")
+}
+
+model ChannelBinding {
+  channelBindingId  String   @id @default(uuid()) @db.Uuid @map("channel_binding_id")
+  tenantId          String   @db.Uuid @map("tenant_id")
+  travelerId        String   @db.Uuid @map("traveler_id")
+  channel           Channel
+  externalAddress   String   @map("external_address")
+  verificationState String   @map("verification_state")
+  verificationCode  String?  @map("verification_code")
+  expiresAt         DateTime? @map("expires_at")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+  traveler          Traveler @relation(fields: [travelerId], references: [travelerId])
+
+  @@unique([tenantId, channel, externalAddress])
+  @@map("channel_binding")
+}

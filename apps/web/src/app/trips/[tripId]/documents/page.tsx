@@ -1,0 +1,4 @@
+import Link from 'next/link';
+import { getActorContext } from '@/lib/auth';
+import { listDocuments } from '@/lib/domain/documents';
+export default async function DocumentsPage({params}:{params:Promise<{tripId:string}>}){const a=await getActorContext();const {tripId}=await params;const docs=await listDocuments(tripId,a.tenantId);return <main className="shell"><Link href={`/trips/${tripId}`}>← Trip Wallet</Link><section className="hero"><h1>Travel documents</h1></section><div className="card list">{docs.map(d=><div className="row" key={d.documentId}><div><strong>{d.sourceReference??d.sourceType}</strong><div className="small muted">{d.retentionState} · v{d.version}</div></div><a className="btn secondary" href={`/api/v1/trips/${tripId}/documents/${d.documentId}/content`}>Open</a></div>)}</div></main>}

@@ -1,0 +1,12 @@
+{
+  "name": "@tripcopilot/db",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "generate": "prisma generate",
+    "migrate": "prisma migrate deploy",
+    "seed": "tsx prisma/seed.ts"
+  },
+  "dependencies": {"@prisma/client": "^6.0.0"},
+  "devDependencies": {"prisma": "^6.0.0", "tsx": "^4.0.0"}
+}

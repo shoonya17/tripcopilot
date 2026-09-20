@@ -1,0 +1,2 @@
+import {actor,safe} from '@/lib/route';import {ok} from '@/lib/http';import {getTravelerPreferences} from '@/lib/domain/preferences';
+export async function GET(_:Request,{params}:{params:Promise<{travelerId:string}>}){return safe(async()=>{const a=await actor();const {travelerId}=await params;if(travelerId!==a.travelerId)throw new Error('FORBIDDEN');return ok(await getTravelerPreferences(travelerId,a.tenantId))})}

@@ -1,0 +1,4 @@
+import Link from 'next/link';
+import { getActorContext } from '@/lib/auth';
+import { getSafety } from '@/lib/domain/safety';
+export default async function SafetyPage({params}:{params:Promise<{tripId:string}>}){const a=await getActorContext();const {tripId}=await params;const safety=await getSafety(tripId,a.tenantId);return <main className="shell"><Link href={`/trips/${tripId}`}>← Trip Wallet</Link><section className="hero"><h1>Safety Brief</h1><p className="muted">Informational only. No background location tracking.</p></section><div className="grid grid-2"><div className="card"><strong>Consent</strong><p className="muted">{safety.consent?.status??'PENDING'}</p></div><div className="card"><strong>Trusted contacts</strong><p className="muted">{safety.contacts.length}</p></div></div></main>}

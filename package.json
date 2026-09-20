@@ -1,0 +1,17 @@
+{
+  "name": "tripcopilot",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": ["apps/web", "packages/core", "packages/db"],
+  "scripts": {
+    "dev": "npm --workspace apps/web run dev",
+    "build": "npm --workspace apps/web run build",
+    "start": "npm --workspace apps/web run start",
+    "lint": "npm --workspace apps/web run lint",
+    "typecheck": "npm --workspace apps/web run typecheck",
+    "test": "node --experimental-strip-types --test tests/unit/*.test.mjs tests/contract/*.test.mjs tests/security/*.test.mjs",
+    "db:generate": "npm --workspace packages/db run generate",
+    "db:migrate": "npm --workspace packages/db run migrate",
+    "db:seed": "npm --workspace packages/db run seed"
+  }
+}
