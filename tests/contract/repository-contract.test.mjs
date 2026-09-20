@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const root = path.resolve(new URL('../../', import.meta.url).pathname);
+const root = fileURLToPath(new URL('../../', import.meta.url));
 const schema = fs.readFileSync(path.join(root,'packages/db/prisma/schema.prisma'),'utf8');
 const migration = fs.readFileSync(path.join(root,'packages/db/prisma/migrations/0001_init/migration.sql'),'utf8');
 
@@ -14,7 +15,10 @@ test('all canonical entities are represented in the data contract', () => {
 
 test('mutable canonical records expose rowVersion in Prisma schema', () => {
   for (const model of ['Traveler','Trip','GroupTrip','TrustedContact','Segment','Connection','Document','Budget','Expense','PreferenceSet','Conflict']) {
-    const block = schema.match(new RegExp(`model ${model} \{([\s\S]*?)\n\}`, 'm'))?.[1] ?? '';
+    const marker = `model ${model} {`;
+const start = schema.indexOf(marker);
+const end = start >= 0 ? schema.indexOf('\n}', start + marker.length) : -1;
+const block = start >= 0 && end >= 0 ? schema.slice(start + marker.length, end) : '';
     assert.match(block, /rowVersion\s+Int/);
   }
   const safety = schema.match(/model SafetyCheckin \{([\s\S]*?)\n\}/m)?.[1] ?? '';

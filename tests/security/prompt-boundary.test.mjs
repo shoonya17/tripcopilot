@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const file = path.resolve(new URL('../../apps/web/src/lib/ai.ts', import.meta.url).pathname);
+const file = fileURLToPath(new URL('../../apps/web/src/lib/ai.ts', import.meta.url));
 const source = fs.readFileSync(file,'utf8');
 
 test('AI extraction explicitly treats source content as untrusted data', () => {
