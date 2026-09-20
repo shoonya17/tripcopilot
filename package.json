@@ -9,16 +9,17 @@
   ],
   "scripts": {
     "dev": "npm --workspace apps/web run dev",
-    "build": "npm --workspace apps/web run build",
+    "build": "npm --workspace packages/core run build && npm --workspace apps/web run build",
     "start": "npm --workspace apps/web run start",
     "lint": "npm --workspace apps/web run lint",
-    "typecheck": "npm --workspace apps/web run typecheck",
+    "typecheck": "npm --workspace packages/core run build && npm --workspace apps/web run typecheck",
     "test": "tsx --test tests/unit/core-dedup.test.mjs tests/unit/core-time.test.mjs tests/contract/repository-contract.test.mjs tests/security/prompt-boundary.test.mjs",
     "db:generate": "npm --workspace packages/db run generate",
     "db:migrate": "npm --workspace packages/db run migrate",
     "db:seed": "npm --workspace packages/db run seed"
   },
   "devDependencies": {
+    "@types/pdf-parse": "^1.1.5",
     "tsx": "^4.23.15"
   }
 }

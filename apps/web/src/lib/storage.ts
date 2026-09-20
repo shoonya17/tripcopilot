@@ -35,7 +35,7 @@ export async function deleteSource(key: string) {
     await s3.send(new DeleteObjectCommand({ Bucket: env.R2_BUCKET, Key: key }));
     return;
   }
-  await fs.rm(path.join(localRoot(), key), { force: true });
+  await fs.rm(path.join(/*turbopackIgnore: true*/ localRoot(), key), { force: true });
 }
 
 export async function readSource(key: string) {
@@ -46,7 +46,7 @@ export async function readSource(key: string) {
     if (!result.Body) throw new Error('NOT_FOUND: source object');
     return Buffer.from(await result.Body.transformToByteArray());
   }
-  return fs.readFile(path.join(localRoot(), key));
+  return fs.readFile(path.join(/*turbopackIgnore: true*/ localRoot(), key));
 }
 
 export async function signedSourceUrl(key: string, expiresIn = 300) {

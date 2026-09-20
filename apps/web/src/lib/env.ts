@@ -23,25 +23,38 @@ const envSchema = z.object({
   NOTIFICATION_WEBHOOK_URL: z.string().url().optional(),
 });
 
-export const env = envSchema.parse({
-  DATABASE_URL: process.env.DATABASE_URL,
-  OPENAI_API_KEY: process.env.OPENAI_API_KEY,
-  OPENAI_PRIMARY_MODEL: process.env.OPENAI_PRIMARY_MODEL,
-  OPENAI_FALLBACK_MODEL: process.env.OPENAI_FALLBACK_MODEL,
-  OPENAI_EXTRACTION_POLICY_VERSION: process.env.OPENAI_EXTRACTION_POLICY_VERSION,
-  OPENAI_EXTRACTION_THRESHOLD: process.env.OPENAI_EXTRACTION_THRESHOLD,
-  DEV_AUTH_BYPASS: process.env.DEV_AUTH_BYPASS,
-  DEV_TENANT_ID: process.env.DEV_TENANT_ID,
-  DEV_TRAVELER_ID: process.env.DEV_TRAVELER_ID,
-  NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
-  R2_ACCOUNT_ID: process.env.R2_ACCOUNT_ID,
-  R2_ACCESS_KEY_ID: process.env.R2_ACCESS_KEY_ID,
-  R2_SECRET_ACCESS_KEY: process.env.R2_SECRET_ACCESS_KEY,
-  R2_BUCKET: process.env.R2_BUCKET,
-  LOCAL_STORAGE_ROOT: process.env.LOCAL_STORAGE_ROOT,
-  INNGEST_EVENT_KEY: process.env.INNGEST_EVENT_KEY,
-  INNGEST_SIGNING_KEY: process.env.INNGEST_SIGNING_KEY,
-  EMAIL_INGESTION_WEBHOOK_SECRET: process.env.EMAIL_INGESTION_WEBHOOK_SECRET,
-  WHATSAPP_INGESTION_WEBHOOK_SECRET: process.env.WHATSAPP_INGESTION_WEBHOOK_SECRET,
-  NOTIFICATION_WEBHOOK_URL: process.env.NOTIFICATION_WEBHOOK_URL,
+type Env = z.infer<typeof envSchema>;
+
+let parsed: Env | undefined;
+
+function getEnv(): Env {
+  parsed ??= envSchema.parse({
+    DATABASE_URL: process.env.DATABASE_URL,
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+    OPENAI_PRIMARY_MODEL: process.env.OPENAI_PRIMARY_MODEL,
+    OPENAI_FALLBACK_MODEL: process.env.OPENAI_FALLBACK_MODEL,
+    OPENAI_EXTRACTION_POLICY_VERSION: process.env.OPENAI_EXTRACTION_POLICY_VERSION,
+    OPENAI_EXTRACTION_THRESHOLD: process.env.OPENAI_EXTRACTION_THRESHOLD,
+    DEV_AUTH_BYPASS: process.env.DEV_AUTH_BYPASS,
+    DEV_TENANT_ID: process.env.DEV_TENANT_ID,
+    DEV_TRAVELER_ID: process.env.DEV_TRAVELER_ID,
+    NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
+    R2_ACCOUNT_ID: process.env.R2_ACCOUNT_ID,
+    R2_ACCESS_KEY_ID: process.env.R2_ACCESS_KEY_ID,
+    R2_SECRET_ACCESS_KEY: process.env.R2_SECRET_ACCESS_KEY,
+    R2_BUCKET: process.env.R2_BUCKET,
+    LOCAL_STORAGE_ROOT: process.env.LOCAL_STORAGE_ROOT,
+    INNGEST_EVENT_KEY: process.env.INNGEST_EVENT_KEY,
+    INNGEST_SIGNING_KEY: process.env.INNGEST_SIGNING_KEY,
+    EMAIL_INGESTION_WEBHOOK_SECRET: process.env.EMAIL_INGESTION_WEBHOOK_SECRET,
+    WHATSAPP_INGESTION_WEBHOOK_SECRET: process.env.WHATSAPP_INGESTION_WEBHOOK_SECRET,
+    NOTIFICATION_WEBHOOK_URL: process.env.NOTIFICATION_WEBHOOK_URL,
+  });
+  return parsed;
+}
+
+// Route modules are evaluated during `next build`; validate required runtime
+// configuration on first use so compilation does not require deployment secrets.
+export const env = new Proxy({} as Env, {
+  get: (_target, property) => getEnv()[property as keyof Env],
 });
