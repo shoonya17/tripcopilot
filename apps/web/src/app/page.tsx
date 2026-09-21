@@ -5,11 +5,11 @@ import { actor } from '@/lib/route';
 import { listTrips } from '@/lib/domain/trips';
 
 export default async function HomePage() {
-  const { userId } = await auth();
+  const { isAuthenticated, redirectToSignIn } = await auth();
 
-  if (!userId) {
-    redirect('/sign-in' as any);;
-  }
+if (!isAuthenticated) {
+  return redirectToSignIn();
+}
 
   const currentActor = await actor();
   const trips = await listTrips(

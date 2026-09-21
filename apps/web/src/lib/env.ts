@@ -2,6 +2,10 @@ import { z } from 'zod';
 
 const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
+  GEMINI_API_KEY: z.string().optional(),
+  DEEPSEEK_API_KEY: z.string().optional(),
+  DEEPSEEK_PRIMARY_MODEL: z.string().default('deepseek-flash'),
+  GEMINI_PRIMARY_MODEL: z.string().default('gemini-3.8-flash'),
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_PRIMARY_MODEL: z.string().default('gpt-5.6-luna'),
   OPENAI_FALLBACK_MODEL: z.string().default('gpt-5.6-terra'),
@@ -30,6 +34,10 @@ let parsed: Env | undefined;
 function getEnv(): Env {
   parsed ??= envSchema.parse({
     DATABASE_URL: process.env.DATABASE_URL,
+    GEMINI_API_KEY: process.env.GEMINI_API_KEY,
+    DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY,
+    DEEPSEEK_PRIMARY_MODEL: process.env.DEEPSEEK_PRIMARY_MODEL,
+    GEMINI_PRIMARY_MODEL: process.env.GEMINI_PRIMARY_MODEL,
     OPENAI_API_KEY: process.env.OPENAI_API_KEY,
     OPENAI_PRIMARY_MODEL: process.env.OPENAI_PRIMARY_MODEL,
     OPENAI_FALLBACK_MODEL: process.env.OPENAI_FALLBACK_MODEL,
