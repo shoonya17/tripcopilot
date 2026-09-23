@@ -263,6 +263,7 @@ async function persistCandidates(
 export async function processIngestion(
   ingestionId: string,
   tenantId: string,
+  opts?: { force?: boolean },
 ) {
   const ingestion =
     await db.ingestionRecord.findFirst({
@@ -388,9 +389,10 @@ export async function processIngestion(
       },
     });
 
-    if (
-      validation.result !== 'VALID' ||
-      lowConfidenceMaterial
+       if (
+      !opts?.force &&
+      (validation.result !== 'VALID' ||
+        lowConfidenceMaterial)
     ) {
       await db.ingestionRecord.update({
         where: { ingestionId },
@@ -668,7 +670,7 @@ export async function processIngestion(
                 tenantId,
                 tripId: trip.tripId,
                 segmentType:
-                  s.segment_type,
+                   s.segment_type ?? 'OTHER',
                 supplierName:
                   s.supplier_name,
                 bookingReference:
