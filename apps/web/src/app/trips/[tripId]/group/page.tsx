@@ -35,4 +35,4 @@ export default async function GroupPage({ params }: { params: Promise<{ tripId: 
       )}
     </main>
   );
-}s
+}
