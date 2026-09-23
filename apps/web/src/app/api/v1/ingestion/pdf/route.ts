@@ -105,8 +105,9 @@ export async function POST(request: NextRequest) {
         documentId = doc.documentId;
       }
 
-      const parser = await import('pdf-parse');
-      const parsed = await parser.default(bytes);
+      const { extractText, getDocumentProxy } = await import('unpdf');
+      const pdf = await getDocumentProxy(new Uint8Array(bytes));
+      const { text: parsedText } = await extractText(pdf, { mergePages: true });
 
       const ing = await tx.ingestionRecord.create({
         data: {
@@ -120,7 +121,7 @@ export async function POST(request: NextRequest) {
           implementationState: 'RECEIVED',
           contentHash,
           documentId,
-          rawText: parsed.text,
+          rawText: parsedText,
           idempotencyKey: key,
         },
       });

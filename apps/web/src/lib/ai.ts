@@ -164,6 +164,20 @@ const SAFE_INSTRUCTIONS = `You are Trip Copilot's travel-document extraction eng
 
 For flight bookings, use segment_type = "FLIGHT". For hotels, "HOTEL". For trains, "TRAIN". Never return "OTHER" unless the segment truly doesn't match any listed type.
 
+Time handling rules:
+- All datetime values (start_at, end_at, departure_local, arrival_local) MUST be expressed in the traveler's local timezone as printed on the source document. Do not convert to UTC. Do not apply offsets.
+- start_timezone and end_timezone must be IANA timezone names (e.g., "Asia/Kolkata"). If the source does not specify a timezone, infer from the location and set confidence accordingly.
+- start_at must equal the earliest segment's departure_local unless the trip has no segments, in which case use the document's stated start.
+- If the source lists both a reporting/check-in time and a departure time, use the departure time.
+
+Segment type rules:
+- Use "BUS" for bus, coach, or intercity bus tickets.
+- Use "TRAIN" for rail.
+- Use "FLIGHT" for air.
+- Use "FERRY" for boat/ferry.
+- Use "HOTEL" for accommodation.
+- Never return "OTHER" for a segment that matches one of the above.
+
 ${SCHEMA_HINT}`;
 
 function trimModelInput(sourceText: string) {
@@ -180,6 +194,26 @@ function stripJsonFences(s: string): string {
     t = t.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '');
   }
   return t;
+}
+
+function looksLikeGarbage(text: string): boolean {
+  const sample = text.slice(0, 4000).replace(/\s+/g, '');
+  if (sample.length < 50) return true;
+
+  const letters = (sample.match(/[a-zA-Z]/g) ?? []).length;
+  const digits = (sample.match(/[0-9]/g) ?? []).length;
+  const alphaRatio = letters / sample.length;
+  const digitRatio = digits / sample.length;
+
+  if (digitRatio > 0.7) return true;
+  if (alphaRatio < 0.2) return true;
+
+  const counts = new Map<string, number>();
+  for (const ch of sample) counts.set(ch, (counts.get(ch) ?? 0) + 1);
+  const max = Math.max(...counts.values());
+  if (max / sample.length > 0.6) return true;
+
+  return false;
 }
 
 function flatten(model: ModelTrip | null | undefined): {
@@ -219,10 +253,26 @@ function flatten(model: ModelTrip | null | undefined): {
     })),
   };
 
-  return { trip, fieldMeta: meta };
+   // Deterministic correction: if the earliest segment's departure_local
+  // disagrees with the trip's start_at, trust the segment. Prevents UTC
+  // conversion or timezone drift from propagating into the heading.
+  if (trip.segments.length > 0 && trip.segments[0].departure_local) {
+    if (trip.start_at !== trip.segments[0].departure_local) {
+      trip.start_at = trip.segments[0].departure_local;
+      if (!trip.start_timezone && trip.segments[0].departure_timezone) {
+        trip.start_timezone = trip.segments[0].departure_timezone;
+      }
+      meta['start_at'] = { confidence: 1, evidence: 'derived from earliest segment departure_local' };
+    }
+  }
+
+return { trip, fieldMeta: meta };
 }
 
 export async function extractTrip(sourceText: string): Promise<ExtractionResult> {
+  if (looksLikeGarbage(sourceText)) {
+    throw new Error('PDF_TEXT_UNREADABLE: The document text could not be read cleanly. Try a different file, or enter the trip manually.');
+  }
   const input = trimModelInput(sourceText);
 
   const runAirouter = async () => {
