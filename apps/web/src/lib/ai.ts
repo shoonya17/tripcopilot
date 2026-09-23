@@ -125,7 +125,9 @@ function isTransientAIError(e: unknown): boolean {
   );
 }
 
-async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
+// Retry only ONCE on transient errors. Airouter/Gemini have their own
+// internal retries disabled — this is the only retry layer.
+async function withRetry<T>(fn: () => Promise<T>, attempts = 2): Promise<T> {
   let lastError: unknown;
   for (let i = 0; i < attempts; i++) {
     try {
@@ -133,14 +135,13 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
     } catch (e) {
       lastError = e;
       if (!isTransientAIError(e) || i === attempts - 1) throw e;
-      const delayMs = 1500 * Math.pow(2, i);
+      const delayMs = 1000 * Math.pow(2, i);
       await new Promise((r) => setTimeout(r, delayMs));
     }
   }
   throw lastError;
 }
 
-// JSON schema hints embedded in the system prompt for JSON-mode providers.
 const SCHEMA_HINT = `Your response MUST be a single JSON object matching this schema exactly:
 {
   "title": { "value": string|null, "confidence": 0-1, "evidence": string|null },
@@ -219,6 +220,8 @@ export async function extractTrip(sourceText: string): Promise<ExtractionResult>
     const client = new OpenAI({
       apiKey: env.AIROUTER_API_KEY,
       baseURL: env.AIROUTER_BASE_URL,
+      timeout: 45000,
+      maxRetries: 0,
     });
 
     const response = await withRetry(() =>
@@ -341,6 +344,8 @@ export async function generateBriefingContent(canonical: unknown): Promise<{ con
     const client = new OpenAI({
       apiKey: env.AIROUTER_API_KEY,
       baseURL: env.AIROUTER_BASE_URL,
+      timeout: 45000,
+      maxRetries: 0,
     });
 
     const response = await withRetry(() =>

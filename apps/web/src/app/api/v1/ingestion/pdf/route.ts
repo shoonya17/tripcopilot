@@ -128,9 +128,14 @@ export async function POST(request: NextRequest) {
       return { ingestionId: ing.ingestionId, documentId };
     });
 
-    await dispatchIngestion(result.ingestionId, a.tenantId);
-
+    // Mark idempotency BEFORE dispatching so a repeat request returns fast.
     await completeIdempotency(a.tenantId, key, result);
+
+    // Fire-and-forget: return to the client immediately; AI runs in the
+    // background. The processing page polls for state changes.
+    dispatchIngestion(result.ingestionId, a.tenantId).catch((err) => {
+      console.error('[pdf] background processing failed', err);
+    });
 
     return created(result);
   });

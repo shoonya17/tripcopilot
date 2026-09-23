@@ -5,6 +5,25 @@ import { useParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { LoadingState } from '@/components/ui/state';
 
+function friendlyStatus(state: string): string {
+  switch (state) {
+    case 'RECEIVED':
+      return 'Reading your document…';
+    case 'PARSING':
+      return 'Extracting your travel details…';
+    case 'EXTRACTED':
+      return 'Building your trip…';
+    case 'REVIEW_REQUIRED':
+      return 'One thing needs your review';
+    case 'CONFIRMED':
+      return 'Redirecting to your Wallet…';
+    case 'PARSE_FAILED':
+      return "We couldn't read this file";
+    default:
+      return 'Working on it…';
+  }
+}
+
 export default function ProcessingPage() {
   const params = useParams<{ ingestionId: string }>();
   const router = useRouter();
@@ -12,6 +31,7 @@ export default function ProcessingPage() {
   const [tripId, setTripId] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [slow, setSlow] = useState(false);
 
   useEffect(() => {
     let stop = false;
@@ -51,6 +71,14 @@ export default function ProcessingPage() {
     };
   }, [params.ingestionId, router]);
 
+  // After 20s, if still working, show a reassuring hint.
+  useEffect(() => {
+    if (state === 'CONFIRMED' || state === 'PARSE_FAILED') return;
+    if (state === 'REVIEW_REQUIRED') return;
+    const t = setTimeout(() => setSlow(true), 20000);
+    return () => clearTimeout(t);
+  }, [state]);
+
   async function confirm() {
     setError(null);
     setConfirming(true);
@@ -84,30 +112,26 @@ export default function ProcessingPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <main className="mx-auto max-w-3xl px-6 py-16">
+      <main className="mx-auto max-w-2xl px-6 py-20">
         <h1 className="text-2xl font-bold tracking-tight">
-          Understanding your trip
+          {friendlyStatus(state)}
         </h1>
-        <p className="mt-2 text-muted-foreground">
-          Current state:{' '}
-          <strong className="text-foreground">{state}</strong>
-        </p>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Source evidence is preserved. Canonical truth is committed only
-          after validation and deduplication.
+        <p className="mt-2 text-sm text-muted-foreground">
+          This usually takes a few seconds.
         </p>
 
         {showConfirm && (
           <div className="mt-8 rounded-xl border border-border bg-card p-6">
-            <h2 className="text-base font-semibold">Review required</h2>
+            <h2 className="text-base font-semibold">
+              Review your trip
+            </h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              The AI extracted your trip, but some fields are below the
-              confidence threshold or missing. You can confirm and continue
-              now, then edit on the Wallet.
+              We found most of your trip details, but a few things were
+              unclear. You can continue now and edit on the Wallet.
             </p>
             <div className="mt-4">
               <Button onClick={confirm} disabled={confirming}>
-                {confirming ? 'Committing…' : 'Confirm and continue'}
+                {confirming ? 'Continuing…' : 'Continue to Wallet'}
               </Button>
             </div>
             {error && (
@@ -118,34 +142,50 @@ export default function ProcessingPage() {
           </div>
         )}
 
-        {showSpinner && <LoadingState label={`Processing — ${state}`} />}
+        {showSpinner && (
+          <div className="mt-8">
+            <LoadingState label="" />
+            {slow && (
+              <p className="mt-2 text-center text-sm text-muted-foreground">
+                Still working — large documents can take a bit longer.
+              </p>
+            )}
+          </div>
+        )}
 
         {showFailed && (
           <div className="mt-8 rounded-xl border border-destructive/30 bg-destructive/5 p-6">
             <h2 className="text-base font-semibold text-destructive">
-              We couldn&apos;t parse this document
+              We couldn&apos;t read this file
             </h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Try the manual entry option or contact support.
+              Try the manual entry option, or contact support if this keeps
+              happening.
             </p>
-            {tripId && (
-              <div className="mt-4">
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                onClick={() => router.push('/trips/new')}
+              >
+                Try another file
+              </Button>
+              {tripId && (
                 <Button
                   variant="outline"
                   onClick={() => router.replace('/trips/' + tripId)}
                 >
                   Open trip anyway
                 </Button>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         )}
 
         {state === 'CONFIRMED' && (
           <div className="mt-8 rounded-xl border border-border bg-card p-6">
-            <h2 className="text-base font-semibold">Trip confirmed</h2>
+            <h2 className="text-base font-semibold">Trip ready</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Redirecting to your Wallet…
+              Opening your Wallet…
             </p>
             <div className="mt-4">
               <Button
