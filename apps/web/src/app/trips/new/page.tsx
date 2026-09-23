@@ -11,6 +11,7 @@ import {
   FileText,
   PenLine,
   Upload,
+  X,
 } from 'lucide-react';
 
 type SegmentDraft = {
@@ -49,30 +50,74 @@ export default function NewTripPage() {
   const [title, setTitle] = useState('');
   const [segments, setSegments] = useState<SegmentDraft[]>([blank()]);
   const [fallbackText, setFallbackText] = useState('');
-  const [pdf, setPdf] = useState<File | null>(null);
+  const [pdfs, setPdfs] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const update = (i: number, k: keyof SegmentDraft, v: string) => {
     setSegments(x => x.map((s, idx) => (idx === i ? { ...s, [k]: v } : s)));
   };
 
+  function addFiles(list: FileList | null) {
+    if (!list) return;
+    const incoming = Array.from(list);
+    setPdfs(prev => {
+      const seen = new Set(prev.map(f => `${f.name}:${f.size}`));
+      const merged = [...prev];
+      for (const f of incoming) {
+        const key = `${f.name}:${f.size}`;
+        if (!seen.has(key)) {
+          merged.push(f);
+          seen.add(key);
+        }
+      }
+      return merged;
+    });
+  }
+
+  function removeFile(idx: number) {
+    setPdfs(prev => prev.filter((_, i) => i !== idx));
+  }
+
+  async function uploadOne(file: File): Promise<string> {
+    const fd = new FormData();
+    fd.append('file', file);
+    const r = await fetch('/api/v1/ingestion/pdf', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': crypto.randomUUID() },
+      body: fd,
+    });
+    const text = await r.text();
+    const j = text ? JSON.parse(text) : {};
+    if (!r.ok) {
+      throw new Error(
+        j?.error?.message ?? `Upload failed (${r.status})`,
+      );
+    }
+    return j.data.ingestionId;
+  }
+
   async function submit() {
     setError(null);
     setBusy(true);
+    setProgress(null);
     try {
       if (mode === 'pdf') {
-        if (!pdf) return;
-        const fd = new FormData();
-        fd.append('file', pdf);
-        const r = await fetch('/api/v1/ingestion/pdf', {
-          method: 'POST',
-          headers: { 'Idempotency-Key': crypto.randomUUID() },
-          body: fd,
-        });
-        const j = await r.json();
-        if (!r.ok) throw new Error(j.error?.message ?? 'PDF ingestion failed');
-        router.push(`/trips/processing/${j.data.ingestionId}`);
+        if (pdfs.length === 0) return;
+
+        let lastId: string | null = null;
+
+        for (let i = 0; i < pdfs.length; i++) {
+          setProgress(
+            `Uploading ${i + 1} of ${pdfs.length}…`,
+          );
+          lastId = await uploadOne(pdfs[i]);
+        }
+
+        if (lastId) {
+          router.push(`/trips/processing/${lastId}`);
+        }
         return;
       }
 
@@ -84,8 +129,10 @@ export default function NewTripPage() {
                 title: title || 'My Trip',
                 start_at: segments[0]?.departure_local || null,
                 end_at: segments.at(-1)?.arrival_local || null,
-                start_timezone: segments[0]?.departure_timezone || null,
-                end_timezone: segments.at(-1)?.arrival_timezone || null,
+                start_timezone:
+                  segments[0]?.departure_timezone || null,
+                end_timezone:
+                  segments.at(-1)?.arrival_timezone || null,
                 segments: segments.map(s => ({
                   ...s,
                   supplier_name: s.supplier_name || null,
@@ -109,13 +156,16 @@ export default function NewTripPage() {
         },
         body: JSON.stringify(payload),
       });
-      const j = await r.json();
-      if (!r.ok) throw new Error(j.error?.message ?? 'Failed');
+      const text = await r.text();
+      const j = text ? JSON.parse(text) : {};
+      if (!r.ok)
+        throw new Error(j?.error?.message ?? 'Failed');
       router.push(`/trips/processing/${j.data.ingestionId}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed');
     } finally {
       setBusy(false);
+      setProgress(null);
     }
   }
 
@@ -124,7 +174,7 @@ export default function NewTripPage() {
     (mode === 'text'
       ? Boolean(fallbackText.trim())
       : mode === 'pdf'
-      ? Boolean(pdf)
+      ? pdfs.length > 0
       : segments.length > 0);
 
   return (
@@ -146,7 +196,9 @@ export default function NewTripPage() {
 
       <main className="mx-auto max-w-4xl px-6 py-12">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold tracking-tight">Add your trip</h1>
+          <h1 className="text-3xl font-bold tracking-tight">
+            Add your trip
+          </h1>
           <p className="mt-2 text-muted-foreground">
             Enter structured details directly, or paste source evidence.
             Manual data follows the same validation, provenance and canonical
@@ -207,7 +259,9 @@ export default function NewTripPage() {
                         variant="ghost"
                         size="sm"
                         onClick={() =>
-                          setSegments(x => x.filter((_, idx) => idx !== i))
+                          setSegments(x =>
+                            x.filter((_, idx) => idx !== i),
+                          )
                         }
                       >
                         <Trash2 className="size-4" />
@@ -236,9 +290,13 @@ export default function NewTripPage() {
                         </label>
                         <input
                           value={s[k]}
-                          onChange={e => update(i, k, e.target.value)}
+                          onChange={e =>
+                            update(i, k, e.target.value)
+                          }
                           placeholder={
-                            k.includes('local') ? '2026-10-04T09:00:00' : ''
+                            k.includes('local')
+                              ? '2026-10-04T09:00:00'
+                              : ''
                           }
                           className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         />
@@ -250,7 +308,9 @@ export default function NewTripPage() {
                       </label>
                       <select
                         value={s.status}
-                        onChange={e => update(i, 'status', e.target.value)}
+                        onChange={e =>
+                          update(i, 'status', e.target.value)
+                        }
                         className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       >
                         {[
@@ -272,7 +332,9 @@ export default function NewTripPage() {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setSegments(x => [...x, blank()])}
+                onClick={() =>
+                  setSegments(x => [...x, blank()])
+                }
               >
                 <Plus className="size-4" />
                 Add segment
@@ -285,15 +347,57 @@ export default function NewTripPage() {
               <label className="mb-1.5 block text-sm font-medium">
                 Booking / itinerary PDF
               </label>
-              <input
-                type="file"
-                accept="application/pdf,.pdf"
-                onChange={e => setPdf(e.target.files?.[0] ?? null)}
-                className="block w-full text-sm text-muted-foreground file:mr-3 file:rounded-md file:border-0 file:bg-secondary file:px-3 file:py-1.5 file:text-sm file:font-medium"
-              />
-              <p className="mt-2 text-xs text-muted-foreground">
+
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-input bg-background px-4 py-2 text-sm font-medium hover:bg-accent">
+                  <Upload className="size-4" />
+                  Choose file{pdfs.length > 0 ? 's' : ''}
+                  <input
+                    type="file"
+                    accept="application/pdf,.pdf"
+                    multiple
+                    className="hidden"
+                    onChange={e => {
+                      addFiles(e.target.files);
+                      // Reset so the same file can be picked again
+                      // if removed and re-added.
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
+
+                {pdfs.length > 0 && (
+                  <span className="text-sm text-muted-foreground">
+                    {pdfs.length} file{pdfs.length === 1 ? '' : 's'} selected
+                  </span>
+                )}
+              </div>
+
+              {pdfs.length > 0 && (
+                <ul className="mt-4 space-y-2">
+                  {pdfs.map((f, i) => (
+                    <li
+                      key={`${f.name}:${f.size}:${i}`}
+                      className="flex items-center justify-between gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm"
+                    >
+                      <span className="truncate">{f.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeFile(i)}
+                        className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                        aria-label={`Remove ${f.name}`}
+                      >
+                        <X className="size-4" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              <p className="mt-3 text-xs text-muted-foreground">
                 PDF bytes are preserved as source evidence, security-checked,
-                parsed and validated before canonical commit.
+                parsed and validated before canonical commit. You can select
+                multiple files at once, or add them one at a time.
               </p>
             </div>
           )}
@@ -313,6 +417,12 @@ export default function NewTripPage() {
             </div>
           )}
 
+          {progress && (
+            <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm">
+              {progress}
+            </div>
+          )}
+
           {error && (
             <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
               {error}
@@ -321,7 +431,7 @@ export default function NewTripPage() {
 
           <div className="flex justify-end pt-2">
             <Button onClick={submit} disabled={!canSubmit}>
-              {busy ? 'Processing…' : 'Create trip'}
+              {busy ? progress ?? 'Processing…' : 'Create trip'}
             </Button>
           </div>
         </div>
