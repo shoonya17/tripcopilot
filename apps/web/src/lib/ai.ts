@@ -182,33 +182,44 @@ function stripJsonFences(s: string): string {
   return t;
 }
 
-function flatten(model: ModelTrip): ExtractionResult['trip'] & { __fieldMeta: Record<string, ExtractionMeta> } {
+function flatten(model: ModelTrip | null | undefined): {
+  trip: ExtractedTrip;
+  fieldMeta: Record<string, ExtractionMeta>;
+} {
   const meta: Record<string, ExtractionMeta> = {};
-  const take = <T>(key: string, value: Field<T>) => {
-    meta[key] = { confidence: value.confidence, evidence: value.evidence };
+
+  const take = <T>(key: string, value: Field<T> | null | undefined): T | null => {
+    if (!value || typeof value !== 'object' || !('value' in value)) {
+      meta[key] = { confidence: 0, evidence: null };
+      return null;
+    }
+    meta[key] = { confidence: value.confidence ?? 0, evidence: value.evidence ?? null };
     return value.value;
   };
 
+  const segments: ModelSegment[] = Array.isArray(model?.segments) ? model!.segments : [];
+
   const trip: ExtractedTrip = {
-    title: take('title', model.title),
-    start_at: take('start_at', model.start_at),
-    end_at: take('end_at', model.end_at),
-    start_timezone: take('start_timezone', model.start_timezone),
-    end_timezone: take('end_timezone', model.end_timezone),
-    segments: model.segments.map((segment, index) => ({
-      segment_type: take(`segments.${index}.segment_type`, segment.segment_type),
-      supplier_name: take(`segments.${index}.supplier_name`, segment.supplier_name),
-      booking_reference: take(`segments.${index}.booking_reference`, segment.booking_reference),
-      departure_local: take(`segments.${index}.departure_local`, segment.departure_local),
-      departure_timezone: take(`segments.${index}.departure_timezone`, segment.departure_timezone),
-      arrival_local: take(`segments.${index}.arrival_local`, segment.arrival_local),
-      arrival_timezone: take(`segments.${index}.arrival_timezone`, segment.arrival_timezone),
-      departure_location: take(`segments.${index}.departure_location`, segment.departure_location),
-      arrival_location: take(`segments.${index}.arrival_location`, segment.arrival_location),
-      status: take(`segments.${index}.status`, segment.status),
+    title: take('title', model?.title),
+    start_at: take('start_at', model?.start_at),
+    end_at: take('end_at', model?.end_at),
+    start_timezone: take('start_timezone', model?.start_timezone),
+    end_timezone: take('end_timezone', model?.end_timezone),
+    segments: segments.map((segment, index) => ({
+      segment_type: take(`segments.${index}.segment_type`, segment?.segment_type) ?? 'OTHER',
+      supplier_name: take(`segments.${index}.supplier_name`, segment?.supplier_name),
+      booking_reference: take(`segments.${index}.booking_reference`, segment?.booking_reference),
+      departure_local: take(`segments.${index}.departure_local`, segment?.departure_local),
+      departure_timezone: take(`segments.${index}.departure_timezone`, segment?.departure_timezone),
+      arrival_local: take(`segments.${index}.arrival_local`, segment?.arrival_local),
+      arrival_timezone: take(`segments.${index}.arrival_timezone`, segment?.arrival_timezone),
+      departure_location: take(`segments.${index}.departure_location`, segment?.departure_location),
+      arrival_location: take(`segments.${index}.arrival_location`, segment?.arrival_location),
+      status: take(`segments.${index}.status`, segment?.status) ?? 'UNKNOWN',
     })),
   };
-  return Object.assign(trip, { __fieldMeta: meta });
+
+  return { trip, fieldMeta: meta };
 }
 
 export async function extractTrip(sourceText: string): Promise<ExtractionResult> {
@@ -241,14 +252,21 @@ export async function extractTrip(sourceText: string): Promise<ExtractionResult>
     const text = response.choices?.[0]?.message?.content;
     if (!text) throw new Error('AIROUTER_EMPTY_RESPONSE');
 
-    const parsed = JSON.parse(stripJsonFences(text)) as ModelTrip;
-    const flattened = flatten(parsed);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(stripJsonFences(text));
+    } catch (e) {
+      console.error('[ai] airouter JSON.parse failed. Raw text (first 2000 chars):', text.slice(0, 2000));
+      throw new Error(`AIROUTER_BAD_JSON: ${e instanceof Error ? e.message : String(e)}`);
+    }
+
+    const { trip, fieldMeta } = flatten(parsed as ModelTrip);
 
     return {
-      trip: flattened as ExtractedTrip,
+      trip,
       model: response.model,
       rawResponseId: response.id,
-      fieldMeta: flattened.__fieldMeta,
+      fieldMeta,
     };
   };
 
@@ -270,13 +288,20 @@ export async function extractTrip(sourceText: string): Promise<ExtractionResult>
 
     if (!response.text) throw new Error('GEMINI_EMPTY_RESPONSE');
 
-    const parsed = JSON.parse(response.text) as ModelTrip;
-    const flattened = flatten(parsed);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(response.text);
+    } catch (e) {
+      console.error('[ai] gemini JSON.parse failed. Raw text (first 2000 chars):', response.text.slice(0, 2000));
+      throw new Error(`GEMINI_BAD_JSON: ${e instanceof Error ? e.message : String(e)}`);
+    }
+
+    const { trip, fieldMeta } = flatten(parsed as ModelTrip);
 
     return {
-      trip: flattened as ExtractedTrip,
+      trip,
       model: env.GEMINI_PRIMARY_MODEL,
-      fieldMeta: flattened.__fieldMeta,
+      fieldMeta,
     };
   };
 
@@ -285,6 +310,7 @@ export async function extractTrip(sourceText: string): Promise<ExtractionResult>
     return await runAirouter();
   } catch (error) {
     airouterError = error;
+    console.error('[ai] airouter extraction failed:', error instanceof Error ? error.message : error);
   }
 
   let geminiError: unknown;
@@ -292,6 +318,7 @@ export async function extractTrip(sourceText: string): Promise<ExtractionResult>
     return await runGemini();
   } catch (error) {
     geminiError = error;
+    console.error('[ai] gemini extraction failed:', error instanceof Error ? error.message : error);
   }
 
   const airouter = airouterError instanceof Error ? airouterError.message : 'Airouter failed';
@@ -396,6 +423,7 @@ export async function generateBriefingContent(canonical: unknown): Promise<{ con
     return await runAirouter();
   } catch (error) {
     airouterError = error;
+    console.error('[ai] airouter briefing failed:', error instanceof Error ? error.message : error);
   }
 
   let geminiError: unknown;
@@ -403,6 +431,7 @@ export async function generateBriefingContent(canonical: unknown): Promise<{ con
     return await runGemini();
   } catch (error) {
     geminiError = error;
+    console.error('[ai] gemini briefing failed:', error instanceof Error ? error.message : error);
   }
 
   const airouter = airouterError instanceof Error ? airouterError.message : 'Airouter failed';
