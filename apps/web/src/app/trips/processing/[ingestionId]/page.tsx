@@ -34,11 +34,11 @@ export default function ProcessingPage() {
   const [slow, setSlow] = useState(false);
 
   useEffect(() => {
-    let stop = false;
-    let redirected = false;
+    let done = false;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
 
     async function tick() {
-      if (redirected) return;
+      if (done) return;
       try {
         const r = await fetch('/api/v1/ingestion/' + params.ingestionId);
         if (!r.ok) return;
@@ -46,17 +46,20 @@ export default function ProcessingPage() {
         const s = j?.data?.productState ?? 'RECEIVED';
         const t = j?.data?.tripId ?? null;
 
-        if (stop) return;
         setState(s);
         if (t) setTripId(t);
 
         if (s === 'CONFIRMED') {
-          redirected = true;
-          if (t) {
-            router.replace('/trips/' + t);
-          } else {
-            router.replace('/trips');
-          }
+          done = true;
+          if (intervalId) clearInterval(intervalId);
+          router.replace(t ? '/trips/' + t : '/trips');
+          return;
+        }
+
+        if (s === 'PARSE_FAILED') {
+          done = true;
+          if (intervalId) clearInterval(intervalId);
+          return;
         }
       } catch {
         // Ignore transient network errors; next tick will retry.
@@ -64,10 +67,11 @@ export default function ProcessingPage() {
     }
 
     tick();
-    const id = setInterval(tick, 1500);
+    intervalId = setInterval(tick, 1500);
+
     return () => {
-      stop = true;
-      clearInterval(id);
+      done = true;
+      if (intervalId) clearInterval(intervalId);
     };
   }, [params.ingestionId, router]);
 

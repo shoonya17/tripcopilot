@@ -123,6 +123,7 @@ export async function POST(request: NextRequest) {
           documentId,
           rawText: parsedText,
           idempotencyKey: key,
+          tripId: existingDoc?.tripId ?? undefined,
         },
       });
 
