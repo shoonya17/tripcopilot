@@ -9,6 +9,7 @@ import { getGroup } from '@/lib/domain/group';
 import { getEffectivePreferences } from '@/lib/domain/preferences';
 import { getActorContext } from '@/lib/auth';
 import TripActions from '@/components/TripActions';
+import DeleteTripButton from '@/components/DeleteTripButton';
 import { recordEvent } from '@/lib/events';
 import { db } from '@/lib/db';
 import { Button } from '@/components/ui/button';
@@ -426,6 +427,14 @@ export default async function TripPage({
             status: s.status,
           }))}
           budgetRows={budget}
+        />
+      </div>
+
+      <div className="mx-auto max-w-6xl px-6 pb-16">
+        <DeleteTripButton
+          tripId={trip.tripId}
+          tripTitle={trip.title ?? 'Untitled trip'}
+          rowVersion={trip.rowVersion}
         />
       </div>
     </div>

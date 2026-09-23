@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 import type { ActorType } from '@prisma/client';
 
 export async function recordAudit(tx: any, input: {
@@ -14,11 +13,10 @@ export async function recordAudit(tx: any, input: {
 }) {
   return tx.auditLog.create({ data: {
     tenantId: input.tenantId,
-    tripId: input.tripId,
+    trip: input.tripId ? { connect: { tripId: input.tripId } } : undefined,
     actorType: input.actorType,
     actorId: input.actorId,
     action: input.action,
-    requestId: input.requestId ?? crypto.randomUUID(),
     entityType: input.entityType,
     entityId: input.entityId,
     metadata: input.metadata as any,

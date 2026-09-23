@@ -41,7 +41,7 @@ export async function advanceTripLifecycle(now = new Date()) {
 
 
 export async function listTrips(tenantId: string, travelerId: string) {
-  return db.trip.findMany({ where: { tenantId, ownerTravelerId: travelerId }, include: { segments: { orderBy: { departureUtc: 'asc' } }, expenses: { orderBy: { incurredAt: 'desc' }, take: 10 }, conflicts: { where: { status: { not: 'RESOLVED' } } } }, orderBy: { startAt: 'desc' } });
+  return db.trip.findMany({ where: { tenantId, ownerTravelerId: travelerId, status: { not: 'ARCHIVED' } }, include: { segments: { orderBy: { departureUtc: 'asc' } }, expenses: { orderBy: { incurredAt: 'desc' }, take: 10 }, conflicts: { where: { status: { not: 'RESOLVED' } } } }, orderBy: { startAt: 'desc' } });
 }
 
 export async function getTrip(tripId: string, tenantId: string) {
@@ -90,4 +90,51 @@ export async function getRightNow(tripId: string, tenantId: string, actorId?: st
   const view = deriveRightNow(segments.map(s => ({ segmentId: s.segmentId, supplierName: s.supplierName, bookingReference: s.bookingReference, departureUtc: s.departureUtc, departureLocation: s.departureLocation, arrivalLocation: s.arrivalLocation, departureTimezone: s.departureTimezone, status: s.status })));
   await recordEvent(db, { tenantId, tripId, eventName: 'RIGHT_NOW_VIEWED', actorType: 'USER', actorId, payload: { hasUpcoming: view.hasUpcoming } });
   return view;
+}
+
+export async function archiveTrip(
+  tripId: string,
+  tenantId: string,
+  actorId: string,
+  rowVersion: number,
+) {
+  if (!Number.isInteger(rowVersion) || rowVersion < 1) {
+    throw new Error('VALIDATION: row_version required');
+  }
+
+  const trip = await db.trip.findFirst({ where: { tripId, tenantId } });
+  if (!trip) throw new Error('NOT_FOUND: trip');
+  if (trip.ownerTravelerId !== actorId) throw new Error('FORBIDDEN');
+
+  const updated = await db.trip.updateMany({
+    where: { tripId, tenantId, ownerTravelerId: actorId, rowVersion },
+    data: { status: 'ARCHIVED', rowVersion: { increment: 1 } },
+  });
+
+  if (updated.count !== 1) throw new Error('STALE_VERSION: trip');
+
+  const row = await db.trip.findUniqueOrThrow({ where: { tripId } });
+
+  await db.$transaction(async (tx) => {
+    await recordAudit(tx, {
+      tenantId,
+      tripId,
+      actorType: 'USER',
+      actorId,
+      action: 'TRIP_ARCHIVED',
+      entityType: 'TRIP',
+      entityId: tripId,
+      metadata: { beforeRowVersion: rowVersion },
+    });
+    await recordEvent(tx, {
+      tenantId,
+      tripId,
+      eventName: 'TRIP_ARCHIVED',
+      actorType: 'USER',
+      actorId,
+      payload: {},
+    });
+  });
+
+  return row;
 }

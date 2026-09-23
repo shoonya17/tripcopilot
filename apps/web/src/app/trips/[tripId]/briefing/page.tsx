@@ -14,6 +14,25 @@ const SECTIONS: Array<{ key: string; title: string }> = [
   { key: 'SAFETY_BRIEF', title: 'Safety brief' },
 ];
 
+function Nav({ tripId }: { tripId: string }) {
+  return (
+    <nav className="border-b border-border">
+      <div className="mx-auto flex max-w-4xl items-center justify-between px-6 py-4">
+        <Link
+          href={`/trips/${tripId}`}
+          className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground"
+        >
+          <ArrowLeft className="size-4" />
+          Trip Wallet
+        </Link>
+        <span className="rounded-full bg-secondary px-3 py-1 text-xs font-medium text-secondary-foreground">
+          Daily briefing
+        </span>
+      </div>
+    </nav>
+  );
+}
+
 export default async function BriefingPage({
   params,
 }: {
@@ -21,30 +40,61 @@ export default async function BriefingPage({
 }) {
   const a = await getActorContext();
   const { tripId } = await params;
-  const b = await viewBriefing(
-    tripId,
-    a.tenantId,
-    a.actorId,
-    'morning',
-  );
-  const content = b.content as Record<string, string | undefined>;
+
+  let briefing: Awaited<ReturnType<typeof viewBriefing>> | null = null;
+  let conflictMessage: string | null = null;
+
+  try {
+    briefing = await viewBriefing(
+      tripId,
+      a.tenantId,
+      a.actorId,
+      'morning',
+    );
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    // Only degrade on known "not available" conflicts.
+    // Anything else (NOT_FOUND, FORBIDDEN, unexpected) should surface.
+    if (message.startsWith('CONFLICT:')) {
+      conflictMessage = message;
+    } else {
+      throw e;
+    }
+  }
+
+  if (!briefing) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Nav tripId={tripId} />
+        <main className="mx-auto max-w-4xl px-6 py-12">
+          <div className="rounded-xl border border-border bg-card p-8">
+            <h1 className="text-xl font-semibold">
+              Briefing not available
+            </h1>
+            <p className="mt-2 text-sm text-muted-foreground">
+              {conflictMessage?.includes('pre-trip')
+                ? 'A pre-trip briefing is only available for trips that are still planned.'
+                : 'Daily briefings are available for trips that are planned or currently active. This trip is in another state.'}
+            </p>
+            <div className="mt-6">
+              <Link
+                href={`/trips/${tripId}`}
+                className="text-sm font-medium text-primary hover:underline"
+              >
+                ← Back to Trip Wallet
+              </Link>
+            </div>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  const content = briefing.content as Record<string, string | undefined>;
 
   return (
     <div className="min-h-screen bg-background">
-      <nav className="border-b border-border">
-        <div className="mx-auto flex max-w-4xl items-center justify-between px-6 py-4">
-          <Link
-            href={`/trips/${tripId}`}
-            className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeft className="size-4" />
-            Trip Wallet
-          </Link>
-          <span className="rounded-full bg-secondary px-3 py-1 text-xs font-medium text-secondary-foreground">
-            Daily briefing
-          </span>
-        </div>
-      </nav>
+      <Nav tripId={tripId} />
 
       <main className="mx-auto max-w-4xl px-6 py-12">
         <div className="mb-10">
@@ -52,7 +102,7 @@ export default async function BriefingPage({
             Daily briefing
           </p>
           <h1 className="mt-2 text-3xl font-bold tracking-tight">
-            {new Date(b.travelDate).toLocaleDateString('en-GB', {
+            {new Date(briefing.travelDate).toLocaleDateString('en-GB', {
               weekday: 'long',
               day: 'numeric',
               month: 'long',
