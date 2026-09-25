@@ -26,6 +26,8 @@ type ModelSegment = {
   arrival_timezone: Field<string | null>;
   departure_location: Field<string | null>;
   arrival_location: Field<string | null>;
+  fare_amount: Field<string | null>;
+  fare_currency: Field<string | null>;
   status: Field<'BOOKED'|'CONFIRMED'|'CHANGED'|'CANCELLED'|'COMPLETED'|'UNKNOWN'>;
 };
 
@@ -65,7 +67,7 @@ const extractionSchema = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['segment_type','supplier_name','booking_reference','departure_local','departure_timezone','arrival_local','arrival_timezone','departure_location','arrival_location','status'],
+        required: ['segment_type','supplier_name','booking_reference','departure_local','departure_timezone','arrival_local','arrival_timezone','departure_location','arrival_location','fare_amount','fare_currency','status'],
         properties: {
           segment_type: field({ type: 'string' }),
           supplier_name: field({ type: ['string','null'] }),
@@ -76,6 +78,8 @@ const extractionSchema = {
           arrival_timezone: field({ type: ['string','null'] }),
           departure_location: field({ type: ['string','null'] }),
           arrival_location: field({ type: ['string','null'] }),
+          fare_amount: field({ type: ['string','null'] }),
+          fare_currency: field({ type: ['string','null'] }),
           status: field({ type: 'string', enum: ['BOOKED','CONFIRMED','CHANGED','CANCELLED','COMPLETED','UNKNOWN'] }),
         },
       },
@@ -154,6 +158,8 @@ const SCHEMA_HINT = `Your response MUST be a single JSON object matching this sc
       "departure_local": { ... }, "departure_timezone": { ... },
       "arrival_local": { ... }, "arrival_timezone": { ... },
       "departure_location": { ... }, "arrival_location": { ... },
+      "fare_amount": { "value": string|null, "confidence": 0-1, "evidence": string|null },
+      "fare_currency": { "value": string|null, "confidence": 0-1, "evidence": string|null },
       "status": { "value": "BOOKED"|"CONFIRMED"|"CHANGED"|"CANCELLED"|"COMPLETED"|"UNKNOWN", "confidence": 0-1, "evidence": string|null }
     }
   ]
@@ -178,6 +184,11 @@ Segment type rules:
 - Use "HOTEL" for accommodation.
 - Never return "OTHER" for a segment that matches one of the above.
 
+Fare extraction rules:
+- If the document shows a total fare, price, or amount paid for the booking, extract the numeric amount into fare_amount (digits and decimal point only, no currency symbol, no thousands separators) and the ISO 4217 currency code into fare_currency (e.g. "INR", "USD", "EUR").
+- If the fare appears as "₹500" or "INR 500", set fare_amount to "500" and fare_currency to "INR".
+- If the fare is not clearly printed on the document, return null for both fare_amount and fare_currency. Never estimate, sum, or infer a fare. Never convert between currencies.
+
 ${SCHEMA_HINT}`;
 
 function trimModelInput(sourceText: string) {
@@ -194,6 +205,38 @@ function stripJsonFences(s: string): string {
     t = t.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '');
   }
   return t;
+}
+
+function repairJson(raw: string): string {
+  let s = raw.trim();
+  s = s.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '');
+  s = s.replace(/\/\/[^\n]*/g, '').replace(/#[^\n]*/g, '');
+  s = s.replace(/,(\s*[}\]])/g, '$1');
+  return s;
+}
+
+function parseModelJson<T>(text: string, label: string): T {
+  const first = stripJsonFences(text);
+  try {
+    return JSON.parse(first) as T;
+  } catch (firstErr) {
+    try {
+      const repaired = repairJson(text);
+      const parsed = JSON.parse(repaired) as T;
+      console.warn(`[ai] ${label} JSON repaired successfully`);
+      return parsed;
+    } catch (secondErr) {
+      console.error(
+        `[ai] ${label} JSON.parse failed. Raw text (first 2000 chars):`,
+        text.slice(0, 2000),
+      );
+      throw new Error(
+        `${label.toUpperCase()}_BAD_JSON: ${
+          secondErr instanceof Error ? secondErr.message : String(secondErr)
+        }`,
+      );
+    }
+  }
 }
 
 function looksLikeGarbage(text: string): boolean {
@@ -249,11 +292,13 @@ function flatten(model: ModelTrip | null | undefined): {
       arrival_timezone: take(`segments.${index}.arrival_timezone`, segment?.arrival_timezone),
       departure_location: take(`segments.${index}.departure_location`, segment?.departure_location),
       arrival_location: take(`segments.${index}.arrival_location`, segment?.arrival_location),
+      fare_amount: take(`segments.${index}.fare_amount`, segment?.fare_amount),
+      fare_currency: take(`segments.${index}.fare_currency`, segment?.fare_currency),
       status: take(`segments.${index}.status`, segment?.status) ?? 'UNKNOWN',
     })),
   };
 
-   // Deterministic correction: if the earliest segment's departure_local
+  // Deterministic correction: if the earliest segment's departure_local
   // disagrees with the trip's start_at, trust the segment. Prevents UTC
   // conversion or timezone drift from propagating into the heading.
   if (trip.segments.length > 0 && trip.segments[0].departure_local) {
@@ -266,7 +311,7 @@ function flatten(model: ModelTrip | null | undefined): {
     }
   }
 
-return { trip, fieldMeta: meta };
+  return { trip, fieldMeta: meta };
 }
 
 export async function extractTrip(sourceText: string): Promise<ExtractionResult> {
@@ -302,15 +347,8 @@ export async function extractTrip(sourceText: string): Promise<ExtractionResult>
     const text = response.choices?.[0]?.message?.content;
     if (!text) throw new Error('AIROUTER_EMPTY_RESPONSE');
 
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(stripJsonFences(text));
-    } catch (e) {
-      console.error('[ai] airouter JSON.parse failed. Raw text (first 2000 chars):', text.slice(0, 2000));
-      throw new Error(`AIROUTER_BAD_JSON: ${e instanceof Error ? e.message : String(e)}`);
-    }
-
-    const { trip, fieldMeta } = flatten(parsed as ModelTrip);
+    const parsed = parseModelJson<ModelTrip>(text, 'airouter');
+    const { trip, fieldMeta } = flatten(parsed);
 
     return {
       trip,
@@ -338,15 +376,8 @@ export async function extractTrip(sourceText: string): Promise<ExtractionResult>
 
     if (!response.text) throw new Error('GEMINI_EMPTY_RESPONSE');
 
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(response.text);
-    } catch (e) {
-      console.error('[ai] gemini JSON.parse failed. Raw text (first 2000 chars):', response.text.slice(0, 2000));
-      throw new Error(`GEMINI_BAD_JSON: ${e instanceof Error ? e.message : String(e)}`);
-    }
-
-    const { trip, fieldMeta } = flatten(parsed as ModelTrip);
+    const parsed = parseModelJson<ModelTrip>(response.text, 'gemini');
+    const { trip, fieldMeta } = flatten(parsed);
 
     return {
       trip,
@@ -440,7 +471,7 @@ export async function generateBriefingContent(canonical: unknown): Promise<{ con
     if (!text) throw new Error('AIROUTER_EMPTY_RESPONSE');
 
     return {
-      content: JSON.parse(stripJsonFences(text)) as BriefingContent,
+      content: parseModelJson<BriefingContent>(text, 'airouter'),
       model: response.model,
     };
   };
@@ -463,7 +494,7 @@ export async function generateBriefingContent(canonical: unknown): Promise<{ con
     if (!response.text) throw new Error('GEMINI_EMPTY_RESPONSE');
 
     return {
-      content: JSON.parse(response.text) as BriefingContent,
+      content: parseModelJson<BriefingContent>(response.text, 'gemini'),
       model: env.GEMINI_PRIMARY_MODEL,
     };
   };
