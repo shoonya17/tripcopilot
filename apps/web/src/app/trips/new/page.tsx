@@ -14,6 +14,54 @@ import {
   X,
 } from 'lucide-react';
 
+const SEGMENT_TYPES = [
+  'FLIGHT',
+  'TRAIN',
+  'BUS',
+  'FERRY',
+  'CAR',
+  'WALK',
+  'HOTEL',
+  'ACTIVITY',
+  'OTHER',
+] as const;
+
+const STATUSES = [
+  'BOOKED',
+  'CONFIRMED',
+  'CHANGED',
+  'CANCELLED',
+  'COMPLETED',
+  'UNKNOWN',
+] as const;
+
+const TIMEZONES = [
+  'Asia/Kolkata',
+  'Asia/Kathmandu',
+  'Asia/Colombo',
+  'Asia/Dubai',
+  'Asia/Singapore',
+  'Asia/Bangkok',
+  'Asia/Hong_Kong',
+  'Asia/Shanghai',
+  'Asia/Tokyo',
+  'Europe/London',
+  'Europe/Paris',
+  'Europe/Berlin',
+  'Europe/Amsterdam',
+  'Europe/Rome',
+  'Europe/Madrid',
+  'America/New_York',
+  'America/Chicago',
+  'America/Denver',
+  'America/Los_Angeles',
+  'America/Sao_Paulo',
+  'Australia/Sydney',
+  'Australia/Melbourne',
+  'Pacific/Auckland',
+  'UTC',
+] as const;
+
 type SegmentDraft = {
   segment_type: string;
   supplier_name: string;
@@ -33,13 +81,21 @@ function blank(): SegmentDraft {
     supplier_name: '',
     booking_reference: '',
     departure_local: '',
-    departure_timezone: '',
+    departure_timezone: 'Asia/Kolkata',
     arrival_local: '',
-    arrival_timezone: '',
+    arrival_timezone: 'Asia/Kolkata',
     departure_location: '',
     arrival_location: '',
     status: 'UNKNOWN',
   };
+}
+
+// <input type="datetime-local"> emits "YYYY-MM-DDTHH:MM".
+// Backend expects full ISO "YYYY-MM-DDTHH:MM:SS".
+function ensureSeconds(v: string): string {
+  if (!v) return v;
+  if (/T\d{2}:\d{2}:\d{2}/.test(v)) return v;
+  return v.length === 16 ? `${v}:00` : v;
 }
 
 type Mode = 'structured' | 'text' | 'pdf';
@@ -51,10 +107,7 @@ type TerminalResult = {
   error?: string;
 };
 
-const TERMINAL_STATES = new Set([
-  'CONFIRMED',
-  'PARSE_FAILED',
-]);
+const TERMINAL_STATES = new Set(['CONFIRMED', 'PARSE_FAILED']);
 
 async function uploadPdf(file: File, tripId: string | null): Promise<string> {
   const fd = new FormData();
@@ -109,7 +162,10 @@ async function waitForIngestion(
         ingestionId,
         tripId,
         failed: state === 'PARSE_FAILED',
-        error: state === 'PARSE_FAILED' ? j?.data?.lastErrorMessage ?? undefined : undefined,
+        error:
+          state === 'PARSE_FAILED'
+            ? j?.data?.lastErrorMessage ?? undefined
+            : undefined,
       };
     }
   }
@@ -134,7 +190,9 @@ export default function NewTripPage() {
   const [error, setError] = useState<string | null>(null);
 
   const update = (i: number, k: keyof SegmentDraft, v: string) => {
-    setSegments(x => x.map((s, idx) => (idx === i ? { ...s, [k]: v } : s)));
+    setSegments(x =>
+      x.map((s, idx) => (idx === i ? { ...s, [k]: v } : s)),
+    );
   };
 
   function addFiles(list: FileList | null) {
@@ -174,18 +232,20 @@ export default function NewTripPage() {
           setProgress(`Uploading ${i + 1} of ${pdfs.length}…`);
           const ingestionId = await uploadPdf(pdfs[i], tripId);
 
-          setProgress(
-            `Extracting ${i + 1} of ${pdfs.length}…`,
-          );
+          setProgress(`Extracting ${i + 1} of ${pdfs.length}…`);
           const result = await waitForIngestion(ingestionId, state => {
             setProgress(
-              `Extracting ${i + 1} of ${pdfs.length}… (${state.toLowerCase().replace('_', ' ')})`,
+              `Extracting ${i + 1} of ${pdfs.length}… (${state
+                .toLowerCase()
+                .replace('_', ' ')})`,
             );
           });
 
           if (result.failed) {
             failures.push(pdfs[i].name);
-            if (!firstFailed) firstFailed = result.error ?? 'Extraction failed';
+            if (!firstFailed) {
+              firstFailed = result.error ?? 'Extraction failed';
+            }
             continue;
           }
 
@@ -199,11 +259,6 @@ export default function NewTripPage() {
           throw new Error('Trip was not created');
         }
 
-        if (failures.length > 0) {
-          // Partial success — still navigate, but flag it
-          console.warn('[upload] some files failed:', failures);
-        }
-
         router.push(`/trips/${tripId}`);
         return;
       }
@@ -214,8 +269,10 @@ export default function NewTripPage() {
               title: title || 'My Trip',
               structured_trip: {
                 title: title || 'My Trip',
-                start_at: segments[0]?.departure_local || null,
-                end_at: segments.at(-1)?.arrival_local || null,
+                start_at:
+                  ensureSeconds(segments[0]?.departure_local) || null,
+                end_at:
+                  ensureSeconds(segments.at(-1)?.arrival_local) || null,
                 start_timezone:
                   segments[0]?.departure_timezone || null,
                 end_timezone:
@@ -224,9 +281,10 @@ export default function NewTripPage() {
                   ...s,
                   supplier_name: s.supplier_name || null,
                   booking_reference: s.booking_reference || null,
-                  departure_local: s.departure_local || null,
+                  departure_local:
+                    ensureSeconds(s.departure_local) || null,
                   departure_timezone: s.departure_timezone || null,
-                  arrival_local: s.arrival_local || null,
+                  arrival_local: ensureSeconds(s.arrival_local) || null,
                   arrival_timezone: s.arrival_timezone || null,
                   departure_location: s.departure_location || null,
                   arrival_location: s.arrival_location || null,
@@ -245,8 +303,7 @@ export default function NewTripPage() {
       });
       const text = await r.text();
       const j = text ? JSON.parse(text) : {};
-      if (!r.ok)
-        throw new Error(j?.error?.message ?? 'Failed');
+      if (!r.ok) throw new Error(j?.error?.message ?? 'Failed');
       router.push(`/trips/processing/${j.data.ingestionId}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed');
@@ -358,59 +415,154 @@ export default function NewTripPage() {
                   </div>
 
                   <div className="grid gap-3 sm:grid-cols-2">
-                    {(
-                      [
-                        ['segment_type', 'Type'],
-                        ['supplier_name', 'Supplier'],
-                        ['booking_reference', 'Booking reference'],
-                        ['departure_local', 'Departure (local ISO)'],
-                        ['departure_timezone', 'Departure timezone'],
-                        ['arrival_local', 'Arrival (local ISO)'],
-                        ['arrival_timezone', 'Arrival timezone'],
-                        ['departure_location', 'Departure location'],
-                        ['arrival_location', 'Arrival location'],
-                      ] as const
-                    ).map(([k, label]) => (
-                      <div key={k}>
-                        <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
-                          {label}
-                        </label>
-                        <input
-                          value={s[k]}
-                          onChange={e =>
-                            update(i, k, e.target.value)
-                          }
-                          placeholder={
-                            k.includes('local')
-                              ? '2026-10-04T09:00:00'
-                              : ''
-                          }
-                          className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        />
-                      </div>
-                    ))}
+                    <div>
+                      <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                        Type
+                      </label>
+                      <select
+                        value={s.segment_type}
+                        onChange={e =>
+                          update(i, 'segment_type', e.target.value)
+                        }
+                        className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        {SEGMENT_TYPES.map(t => (
+                          <option key={t}>{t}</option>
+                        ))}
+                      </select>
+                    </div>
+
                     <div>
                       <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
                         Status
                       </label>
                       <select
                         value={s.status}
+                        onChange={e => update(i, 'status', e.target.value)}
+                        className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        {STATUSES.map(t => (
+                          <option key={t}>{t}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                        Supplier
+                      </label>
+                      <input
+                        value={s.supplier_name}
                         onChange={e =>
-                          update(i, 'status', e.target.value)
+                          update(i, 'supplier_name', e.target.value)
+                        }
+                        placeholder="IndiGo, Mahalaxmi Travels, Taj Hotels…"
+                        className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                        Booking reference
+                      </label>
+                      <input
+                        value={s.booking_reference}
+                        onChange={e =>
+                          update(i, 'booking_reference', e.target.value)
+                        }
+                        placeholder="PNR, ticket number, confirmation code"
+                        className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                        Departure
+                      </label>
+                      <input
+                        type="datetime-local"
+                        value={s.departure_local}
+                        onChange={e =>
+                          update(i, 'departure_local', e.target.value)
+                        }
+                        className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                        Departure timezone
+                      </label>
+                      <select
+                        value={s.departure_timezone}
+                        onChange={e =>
+                          update(i, 'departure_timezone', e.target.value)
                         }
                         className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       >
-                        {[
-                          'BOOKED',
-                          'CONFIRMED',
-                          'CHANGED',
-                          'CANCELLED',
-                          'COMPLETED',
-                          'UNKNOWN',
-                        ].map(v => (
-                          <option key={v}>{v}</option>
+                        {TIMEZONES.map(tz => (
+                          <option key={tz}>{tz}</option>
                         ))}
                       </select>
+                    </div>
+
+                    <div>
+                      <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                        Arrival
+                      </label>
+                      <input
+                        type="datetime-local"
+                        value={s.arrival_local}
+                        onChange={e =>
+                          update(i, 'arrival_local', e.target.value)
+                        }
+                        className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                        Arrival timezone
+                      </label>
+                      <select
+                        value={s.arrival_timezone}
+                        onChange={e =>
+                          update(i, 'arrival_timezone', e.target.value)
+                        }
+                        className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        {TIMEZONES.map(tz => (
+                          <option key={tz}>{tz}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                        Departure location
+                      </label>
+                      <input
+                        value={s.departure_location}
+                        onChange={e =>
+                          update(i, 'departure_location', e.target.value)
+                        }
+                        placeholder="Delhi Airport, Mumbai CST…"
+                        className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                        Arrival location
+                      </label>
+                      <input
+                        value={s.arrival_location}
+                        onChange={e =>
+                          update(i, 'arrival_location', e.target.value)
+                        }
+                        placeholder="Mumbai Airport, Pune Junction…"
+                        className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      />
                     </div>
                   </div>
                 </div>
@@ -419,9 +571,7 @@ export default function NewTripPage() {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() =>
-                  setSegments(x => [...x, blank()])
-                }
+                onClick={() => setSegments(x => [...x, blank()])}
               >
                 <Plus className="size-4" />
                 Add segment
