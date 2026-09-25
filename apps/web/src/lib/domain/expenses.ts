@@ -69,3 +69,100 @@ export async function patchExpense(tripId: string, expenseId: string, tenantId: 
     return updated;
   });
 }
+
+
+export async function confirmExpense(
+  tripId: string,
+  expenseId: string,
+  tenantId: string,
+  actorId: string,
+  rowVersion: number,
+) {
+  if (!Number.isInteger(rowVersion) || rowVersion < 1) {
+    throw new Error('VALIDATION: row_version required');
+  }
+  const existing = await db.expense.findFirst({
+    where: { expenseId, tripId, tenantId },
+  });
+  if (!existing) throw new Error('NOT_FOUND: expense');
+
+  return db.$transaction(async (tx) => {
+    const result = await tx.expense.updateMany({
+      where: { expenseId, tenantId, rowVersion },
+      data: {
+        userConfirmed: true,
+        confirmedAt: new Date(),
+        rowVersion: { increment: 1 },
+      },
+    });
+    if (result.count !== 1) throw new Error('STALE_VERSION: expense');
+    const updated = await tx.expense.findUniqueOrThrow({ where: { expenseId } });
+
+    await recordAudit(tx, {
+      tenantId,
+      tripId,
+      actorType: 'USER',
+      actorId,
+      action: 'EXPENSE_CONFIRMED',
+      entityType: 'EXPENSE',
+      entityId: expenseId,
+      metadata: { beforeRowVersion: rowVersion },
+    });
+    await recordEvent(tx, {
+      tenantId,
+      tripId,
+      eventName: 'EXPENSE_CONFIRMED',
+      actorType: 'USER',
+      actorId,
+      behavioralClass: 'REVIEW',
+      payload: { expenseId },
+    });
+    return updated;
+  });
+}
+
+export async function deleteExpense(
+  tripId: string,
+  expenseId: string,
+  tenantId: string,
+  actorId: string,
+  rowVersion: number,
+) {
+  if (!Number.isInteger(rowVersion) || rowVersion < 1) {
+    throw new Error('VALIDATION: row_version required');
+  }
+  const existing = await db.expense.findFirst({
+    where: { expenseId, tripId, tenantId },
+  });
+  if (!existing) throw new Error('NOT_FOUND: expense');
+  if (existing.userConfirmed && existing.sourceType !== 'EXTRACTED_FARE') {
+    throw new Error('CONFLICT: confirmed user expenses cannot be deleted this way');
+  }
+
+  await db.$transaction(async (tx) => {
+    await tx.expense.deleteMany({
+      where: { expenseId, tenantId, rowVersion },
+    });
+    await recordAudit(tx, {
+      tenantId,
+      tripId,
+      actorType: 'USER',
+      actorId,
+      action: 'EXPENSE_DISMISSED',
+      entityType: 'EXPENSE',
+      entityId: expenseId,
+      metadata: { sourceType: existing.sourceType },
+    });
+    await recordEvent(tx, {
+      tenantId,
+      tripId,
+      eventName: 'EXPENSE_DISMISSED',
+      actorType: 'USER',
+      actorId,
+      behavioralClass: 'REVIEW',
+      payload: { expenseId },
+    });
+  });
+
+  return { expenseId, deleted: true };
+}
