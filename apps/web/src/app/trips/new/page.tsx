@@ -12,6 +12,7 @@ import {
   PenLine,
   Upload,
   X,
+  Image as ImageIcon,
 } from 'lucide-react';
 
 const SEGMENT_TYPES = [
@@ -98,7 +99,7 @@ function ensureSeconds(v: string): string {
   return v.length === 16 ? `${v}:00` : v;
 }
 
-type Mode = 'structured' | 'text' | 'pdf';
+type Mode = 'structured' | 'text' | 'pdf' | 'screenshot';
 
 type TerminalResult = {
   ingestionId: string;
@@ -115,6 +116,24 @@ async function uploadPdf(file: File, tripId: string | null): Promise<string> {
   if (tripId) fd.append('tripId', tripId);
 
   const r = await fetch('/api/v1/ingestion/pdf', {
+    method: 'POST',
+    headers: { 'Idempotency-Key': crypto.randomUUID() },
+    body: fd,
+  });
+  const text = await r.text();
+  const j = text ? JSON.parse(text) : {};
+  if (!r.ok) {
+    throw new Error(j?.error?.message ?? `Upload failed (${r.status})`);
+  }
+  return j.data.ingestionId as string;
+}
+
+async function uploadImage(file: File, tripId: string | null): Promise<string> {
+  const fd = new FormData();
+  fd.append('file', file);
+  if (tripId) fd.append('tripId', tripId);
+
+  const r = await fetch('/api/v1/ingestion/image', {
     method: 'POST',
     headers: { 'Idempotency-Key': crypto.randomUUID() },
     body: fd,
@@ -185,6 +204,7 @@ export default function NewTripPage() {
   const [segments, setSegments] = useState<SegmentDraft[]>([blank()]);
   const [fallbackText, setFallbackText] = useState('');
   const [pdfs, setPdfs] = useState<File[]>([]);
+  const [screenshots, setScreenshots] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -263,6 +283,46 @@ export default function NewTripPage() {
         return;
       }
 
+      if (mode === 'screenshot') {
+        if (screenshots.length === 0) return;
+
+        let tripId: string | null = null;
+        let firstFailed: string | null = null;
+        const failures: string[] = [];
+
+        for (let i = 0; i < screenshots.length; i++) {
+          setProgress(`Uploading ${i + 1} of ${screenshots.length}…`);
+          const ingestionId = await uploadImage(screenshots[i], tripId);
+
+          setProgress(`Reading ${i + 1} of ${screenshots.length}…`);
+          const result = await waitForIngestion(ingestionId, state => {
+            setProgress(
+              `Reading ${i + 1} of ${screenshots.length}… (${state
+                .toLowerCase()
+                .replace('_', ' ')})`,
+            );
+          });
+
+          if (result.failed) {
+            failures.push(screenshots[i].name);
+            if (!firstFailed) {
+              firstFailed = result.error ?? 'Extraction failed';
+            }
+            continue;
+          }
+          if (result.tripId) tripId = result.tripId;
+        }
+
+        if (!tripId) {
+          if (failures.length === screenshots.length) {
+            throw new Error(firstFailed ?? 'All screenshots failed');
+          }
+          throw new Error('Trip was not created');
+        }
+        router.push(`/trips/${tripId}`);
+        return;
+      }
+
       const payload =
         mode === 'structured'
           ? {
@@ -319,6 +379,8 @@ export default function NewTripPage() {
       ? Boolean(fallbackText.trim())
       : mode === 'pdf'
       ? pdfs.length > 0
+      : mode === 'screenshot'
+      ? screenshots.length > 0
       : segments.length > 0);
 
   return (
@@ -355,6 +417,7 @@ export default function NewTripPage() {
             { id: 'structured' as const, label: 'Structured entry', icon: PenLine },
             { id: 'text' as const, label: 'Paste evidence', icon: FileText },
             { id: 'pdf' as const, label: 'Upload PDF', icon: Upload },
+            { id: 'screenshot' as const, label: 'Screenshot', icon: ImageIcon },
           ].map(({ id, label, icon: Icon }) => (
             <button
               key={id}
@@ -633,6 +696,78 @@ export default function NewTripPage() {
                 Upload multiple PDFs for the same trip (flight, hotel,
                 activity). They are extracted one at a time and attached to a
                 single trip. Larger batches take longer.
+              </p>
+            </div>
+          )}
+
+          {mode === 'screenshot' && (
+            <div>
+              <label className="mb-1.5 block text-sm font-medium">
+                Booking screenshot(s)
+              </label>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-input bg-background px-4 py-2 text-sm font-medium hover:bg-accent">
+                  <ImageIcon className="size-4" />
+                  Choose screenshots
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={e => {
+                      if (!e.target.files) return;
+                      const incoming = Array.from(e.target.files);
+                      setScreenshots(prev => {
+                        const seen = new Set(prev.map(f => `${f.name}:${f.size}`));
+                        const merged = [...prev];
+                        for (const f of incoming) {
+                          const key = `${f.name}:${f.size}`;
+                          if (!seen.has(key)) {
+                            merged.push(f);
+                            seen.add(key);
+                          }
+                        }
+                        return merged;
+                      });
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
+
+                {screenshots.length > 0 && (
+                  <span className="text-sm text-muted-foreground">
+                    {screenshots.length} file{screenshots.length === 1 ? '' : 's'} selected
+                  </span>
+                )}
+              </div>
+
+              {screenshots.length > 0 && (
+                <ul className="mt-4 space-y-2">
+                  {screenshots.map((f, i) => (
+                    <li
+                      key={`${f.name}:${f.size}:${i}`}
+                      className="flex items-center justify-between gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm"
+                    >
+                      <span className="truncate">{f.name}</span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setScreenshots(prev => prev.filter((_, idx) => idx !== i))
+                        }
+                        className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                      >
+                        <X className="size-4" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              <p className="mt-3 text-xs text-muted-foreground">
+                Upload screenshots of bookings (JPEG, PNG, WebP). Each is read
+                by AI vision and attached to a single trip. Larger batches
+                take longer.
               </p>
             </div>
           )}

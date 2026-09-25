@@ -408,6 +408,50 @@ export async function extractTrip(sourceText: string): Promise<ExtractionResult>
   throw new Error(`AI_EXTRACTION_FAILED: airouter=${airouter}; gemini=${gemini}`);
 }
 
+export async function extractTripFromImage(
+  imageBytes: Uint8Array,
+  mimeType: string,
+): Promise<ExtractionResult> {
+  if (!env.GEMINI_API_KEY) {
+    throw new Error(
+      'GEMINI_NOT_CONFIGURED: image ingestion requires Gemini',
+    );
+  }
+
+  const base64 = Buffer.from(imageBytes).toString('base64');
+  const client = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
+
+  const response = await withRetry(() =>
+    client.models.generateContent({
+      model: env.GEMINI_PRIMARY_MODEL,
+      contents: [
+        { text: SAFE_INSTRUCTIONS },
+        {
+          inlineData: {
+            mimeType,
+            data: base64,
+          },
+        },
+      ],
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: toGeminiSchema(extractionSchema),
+      },
+    }),
+  );
+
+  if (!response.text) throw new Error('GEMINI_EMPTY_RESPONSE');
+
+  const parsed = parseModelJson<ModelTrip>(response.text, 'gemini-image');
+  const { trip, fieldMeta } = flatten(parsed);
+
+  return {
+    trip,
+    model: env.GEMINI_PRIMARY_MODEL,
+    fieldMeta,
+  };
+}
+
 export function manualExtractionResult(trip: ExtractedTrip): ExtractionResult {
   const fieldMeta: Record<string, ExtractionMeta> = {};
   for (const [key, value] of Object.entries(trip)) {

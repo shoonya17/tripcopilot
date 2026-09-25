@@ -2,6 +2,7 @@ import { db } from '../db';
 import { env } from '../env';
 import {
   extractTrip,
+  extractTripFromImage,
   manualExtractionResult,
   type ExtractionMeta,
 } from '../ai';
@@ -260,6 +261,27 @@ async function persistCandidates(
   });
 }
 
+function detectImageMime(bytes: Buffer): string | null {
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return 'image/jpeg';
+  }
+  if (
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47
+  ) {
+    return 'image/png';
+  }
+  if (
+    bytes.slice(0, 4).toString() === 'RIFF' &&
+    bytes.slice(8, 12).toString() === 'WEBP'
+  ) {
+    return 'image/webp';
+  }
+  return null;
+}
+
 export async function processIngestion(
   ingestionId: string,
   tenantId: string,
@@ -280,15 +302,13 @@ export async function processIngestion(
   if (ingestion.productState === 'CONFIRMED') {
     return ingestion;
   }
+  const sourceText = ingestion.rawText ?? '';
 
-  const sourceText = ingestion.rawText;
-
-  if (!sourceText) {
+  if (!sourceText && ingestion.channel !== 'IMAGE') {
     throw new Error(
       'PARSE_FAILED:NO_SOURCE_TEXT',
     );
   }
-
   await db.ingestionRecord.update({
     where: { ingestionId },
     data: {
@@ -302,18 +322,42 @@ export async function processIngestion(
     },
   });
 
-  try {
-    const isManual =
-      ingestion.channel === 'MANUAL';
+  try {    const isManual = ingestion.channel === 'MANUAL';
+    const isImage = ingestion.channel === 'IMAGE';
 
-    const manualTrip = isManual
-      ? structuredFromManual(sourceText)
-      : null;
+    let extractionResult;
 
-    const extractionResult = manualTrip
-      ? manualExtractionResult(manualTrip)
-      : await extractTrip(sourceText);
-
+    if (isManual) {
+      const manualTrip = structuredFromManual(sourceText);
+      extractionResult = manualTrip
+        ? manualExtractionResult(manualTrip)
+        : await extractTrip(sourceText);
+    } else if (isImage) {
+      if (!ingestion.documentId) {
+        throw new Error('PARSE_FAILED:IMAGE_WITHOUT_DOCUMENT');
+      }
+      const doc = await db.document.findFirst({
+        where: {
+          documentId: ingestion.documentId,
+          tenantId,
+        },
+      });
+      if (!doc) {
+        throw new Error('NOT_FOUND:document');
+      }
+      const { readSource } = await import('../storage');
+      const bytes = Buffer.from(await readSource(doc.storageObjectKey));
+      const detected = detectImageMime(bytes);
+      if (!detected) {
+        throw new Error('PARSE_FAILED:UNRECOGNIZED_IMAGE_FORMAT');
+      }
+      extractionResult = await extractTripFromImage(
+        new Uint8Array(bytes),
+        detected,
+      );
+    } else {
+      extractionResult = await extractTrip(sourceText);
+    }
     const extraction = extractionResult.trip;
 
     await db.ingestionRecord.update({
