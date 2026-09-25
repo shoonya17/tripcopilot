@@ -389,7 +389,7 @@ export async function processIngestion(
       },
     });
 
-       if (
+    if (
       !opts?.force &&
       (validation.result !== 'VALID' ||
         lowConfidenceMaterial)
@@ -751,6 +751,48 @@ export async function processIngestion(
             });
           }
 
+          if (s.fare_amount && s.fare_currency) {
+            const amount = Number(s.fare_amount);
+            const currency = String(s.fare_currency).toUpperCase();
+            if (
+              Number.isFinite(amount) &&
+              amount > 0 &&
+              /^[A-Z]{3}$/.test(currency)
+            ) {
+              const segmentIndex = extraction.segments.indexOf(s);
+              const fareMeta =
+                extractionResult.fieldMeta[
+                  `segments.${segmentIndex}.fare_amount`
+                ];
+              const incurredAt = s.departure_local
+                ? new Date(
+                    `${String(s.departure_local).replace(/Z$/, '')}Z`,
+                  )
+                : new Date();
+              await tx.expense.create({
+                data: {
+                  tenantId,
+                  tripId: trip.tripId,
+                  travelerId: ingestion.travelerId ?? undefined,
+                  amount: amount.toFixed(4),
+                  currency,
+                  merchantOrDescription: s.supplier_name
+                    ? `${s.supplier_name} fare`
+                    : `${s.segment_type ?? 'Segment'} fare`,
+                  incurredAt,
+                  location: s.departure_location ?? null,
+                  source: 'DOCUMENT',
+                  sourceType: 'EXTRACTED_FARE',
+                  confidence:
+                    typeof fareMeta?.confidence === 'number'
+                      ? fareMeta.confidence
+                      : null,
+                  userConfirmed: false,
+                },
+              });
+            }
+          }
+
           await tx.dedupDecision.create({
             data: {
               tenantId,
@@ -789,6 +831,7 @@ export async function processIngestion(
 
         return trip;
       },
+      { timeout: 60_000, maxWait: 15_000 },
     );
 
     await db.ingestionRecord.update({
