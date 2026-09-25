@@ -38,6 +38,11 @@ export async function POST(request: NextRequest) {
     }
 
     const bytes = Buffer.from(await file.arrayBuffer());
+    const formTripId = form.get('tripId');
+    const clientTripId =
+      typeof formTripId === 'string' && formTripId.length > 0
+        ? formTripId
+        : null;
 
     if (bytes.subarray(0, 5).toString() !== '%PDF-') {
       throw new Error('VALIDATION:invalid PDF signature');
@@ -123,7 +128,7 @@ export async function POST(request: NextRequest) {
           documentId,
           rawText: parsedText,
           idempotencyKey: key,
-          tripId: existingDoc?.tripId ?? undefined,
+                    tripId: clientTripId ?? existingDoc?.tripId ?? undefined,
         },
       });
 

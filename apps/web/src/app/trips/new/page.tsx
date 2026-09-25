@@ -44,6 +44,84 @@ function blank(): SegmentDraft {
 
 type Mode = 'structured' | 'text' | 'pdf';
 
+type TerminalResult = {
+  ingestionId: string;
+  tripId: string | null;
+  failed: boolean;
+  error?: string;
+};
+
+const TERMINAL_STATES = new Set([
+  'CONFIRMED',
+  'PARSE_FAILED',
+]);
+
+async function uploadPdf(file: File, tripId: string | null): Promise<string> {
+  const fd = new FormData();
+  fd.append('file', file);
+  if (tripId) fd.append('tripId', tripId);
+
+  const r = await fetch('/api/v1/ingestion/pdf', {
+    method: 'POST',
+    headers: { 'Idempotency-Key': crypto.randomUUID() },
+    body: fd,
+  });
+  const text = await r.text();
+  const j = text ? JSON.parse(text) : {};
+  if (!r.ok) {
+    throw new Error(j?.error?.message ?? `Upload failed (${r.status})`);
+  }
+  return j.data.ingestionId as string;
+}
+
+async function waitForIngestion(
+  ingestionId: string,
+  onTick: (state: string) => void,
+): Promise<TerminalResult> {
+  const deadline = Date.now() + 120_000;
+  let confirmAttempted = false;
+
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 1500));
+
+    const r = await fetch(`/api/v1/ingestion/${ingestionId}`);
+    if (!r.ok) continue;
+    const j = await r.json().catch(() => ({}));
+    const state = j?.data?.productState ?? 'RECEIVED';
+    const tripId = j?.data?.tripId ?? null;
+
+    onTick(state);
+
+    if (state === 'REVIEW_REQUIRED' && !confirmAttempted) {
+      confirmAttempted = true;
+      try {
+        await fetch(`/api/v1/ingestion/${ingestionId}/confirm`, {
+          method: 'POST',
+        });
+      } catch {
+        // Ignore; next tick will re-check
+      }
+      continue;
+    }
+
+    if (TERMINAL_STATES.has(state)) {
+      return {
+        ingestionId,
+        tripId,
+        failed: state === 'PARSE_FAILED',
+        error: state === 'PARSE_FAILED' ? j?.data?.lastErrorMessage ?? undefined : undefined,
+      };
+    }
+  }
+
+  return {
+    ingestionId,
+    tripId: null,
+    failed: true,
+    error: 'Timed out waiting for extraction',
+  };
+}
+
 export default function NewTripPage() {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>('structured');
@@ -80,24 +158,6 @@ export default function NewTripPage() {
     setPdfs(prev => prev.filter((_, i) => i !== idx));
   }
 
-  async function uploadOne(file: File): Promise<string> {
-    const fd = new FormData();
-    fd.append('file', file);
-    const r = await fetch('/api/v1/ingestion/pdf', {
-      method: 'POST',
-      headers: { 'Idempotency-Key': crypto.randomUUID() },
-      body: fd,
-    });
-    const text = await r.text();
-    const j = text ? JSON.parse(text) : {};
-    if (!r.ok) {
-      throw new Error(
-        j?.error?.message ?? `Upload failed (${r.status})`,
-      );
-    }
-    return j.data.ingestionId;
-  }
-
   async function submit() {
     setError(null);
     setBusy(true);
@@ -106,18 +166,45 @@ export default function NewTripPage() {
       if (mode === 'pdf') {
         if (pdfs.length === 0) return;
 
-        let lastId: string | null = null;
+        let tripId: string | null = null;
+        let firstFailed: string | null = null;
+        const failures: string[] = [];
 
         for (let i = 0; i < pdfs.length; i++) {
+          setProgress(`Uploading ${i + 1} of ${pdfs.length}…`);
+          const ingestionId = await uploadPdf(pdfs[i], tripId);
+
           setProgress(
-            `Uploading ${i + 1} of ${pdfs.length}…`,
+            `Extracting ${i + 1} of ${pdfs.length}…`,
           );
-          lastId = await uploadOne(pdfs[i]);
+          const result = await waitForIngestion(ingestionId, state => {
+            setProgress(
+              `Extracting ${i + 1} of ${pdfs.length}… (${state.toLowerCase().replace('_', ' ')})`,
+            );
+          });
+
+          if (result.failed) {
+            failures.push(pdfs[i].name);
+            if (!firstFailed) firstFailed = result.error ?? 'Extraction failed';
+            continue;
+          }
+
+          if (result.tripId) tripId = result.tripId;
         }
 
-        if (lastId) {
-          router.push(`/trips/processing/${lastId}`);
+        if (!tripId) {
+          if (failures.length === pdfs.length) {
+            throw new Error(firstFailed ?? 'All uploads failed');
+          }
+          throw new Error('Trip was not created');
         }
+
+        if (failures.length > 0) {
+          // Partial success — still navigate, but flag it
+          console.warn('[upload] some files failed:', failures);
+        }
+
+        router.push(`/trips/${tripId}`);
         return;
       }
 
@@ -345,13 +432,13 @@ export default function NewTripPage() {
           {mode === 'pdf' && (
             <div>
               <label className="mb-1.5 block text-sm font-medium">
-                Booking / itinerary PDF
+                Booking / itinerary PDFs
               </label>
 
               <div className="flex flex-wrap items-center gap-3">
                 <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-input bg-background px-4 py-2 text-sm font-medium hover:bg-accent">
                   <Upload className="size-4" />
-                  Choose file{pdfs.length > 0 ? 's' : ''}
+                  Choose booking PDFs
                   <input
                     type="file"
                     accept="application/pdf,.pdf"
@@ -359,8 +446,6 @@ export default function NewTripPage() {
                     className="hidden"
                     onChange={e => {
                       addFiles(e.target.files);
-                      // Reset so the same file can be picked again
-                      // if removed and re-added.
                       e.target.value = '';
                     }}
                   />
@@ -395,9 +480,9 @@ export default function NewTripPage() {
               )}
 
               <p className="mt-3 text-xs text-muted-foreground">
-                PDF bytes are preserved as source evidence, security-checked,
-                parsed and validated before canonical commit. You can select
-                multiple files at once, or add them one at a time.
+                Upload multiple PDFs for the same trip (flight, hotel,
+                activity). They are extracted one at a time and attached to a
+                single trip. Larger batches take longer.
               </p>
             </div>
           )}
