@@ -9,6 +9,7 @@ import { getGroup } from '@/lib/domain/group';
 import { getEffectivePreferences } from '@/lib/domain/preferences';
 import { getActorContext } from '@/lib/auth';
 import TripActions from '@/components/TripActions';
+import SegmentDeleteButton from '@/components/SegmentDeleteButton';
 import DeleteTripButton from '@/components/DeleteTripButton';
 import { recordEvent } from '@/lib/events';
 import { db } from '@/lib/db';
@@ -220,14 +221,23 @@ export default async function TripPage({
                 key={s.segmentId}
                 className="rounded-lg border border-border bg-muted/30 p-4"
               >
-                <div className="flex items-start justify-between gap-3">
+                                <div className="flex items-start justify-between gap-3">
                   <strong className="text-sm font-semibold">
                     {s.segmentType}
                     {s.supplierName ? ` · ${s.supplierName}` : ''}
                   </strong>
-                  <span className="shrink-0 rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-secondary-foreground">
-                    {s.status}
-                  </span>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span className="rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-secondary-foreground">
+                      {s.status}
+                    </span>
+                    <SegmentDeleteButton
+                      tripId={tripId}
+                      segmentId={s.segmentId}
+                      label={`${s.segmentType ?? 'Segment'}${
+                        s.supplierName ? ` — ${s.supplierName}` : ''
+                      }`}
+                    />
+                  </div>
                 </div>
                 <div className="mt-2 text-sm text-muted-foreground">
                   {s.departureLocation ?? 'Unknown'} →{' '}
