@@ -30,6 +30,8 @@ const manualSegmentSchema = z.object({
   arrival_timezone: z.string().optional().nullable(),
   departure_location: z.string().max(300).optional().nullable(),
   arrival_location: z.string().max(300).optional().nullable(),
+  fare_amount: z.string().optional().nullable(),
+  fare_currency: z.string().length(3).optional().nullable(),
   status: segmentStatusSchema.optional(),
 });
 
@@ -80,6 +82,8 @@ export type ExtractedTrip = {
     arrival_timezone?: string | null;
     departure_location?: string | null;
     arrival_location?: string | null;
+    fare_amount?: string | null;
+    fare_currency?: string | null;
     status?: 'BOOKED'|'CONFIRMED'|'CHANGED'|'CANCELLED'|'COMPLETED'|'UNKNOWN';
   }>;
 };

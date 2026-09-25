@@ -76,11 +76,13 @@ export default async function TripPage({
     (s: number, b: any) => s + Number(b.plannedAmount),
     0,
   );
-  const expenseTotal = expensePage.items.reduce(
+   const confirmedExpenses = expensePage.items.filter(
+    (e: any) => !(e.sourceType === 'EXTRACTED_FARE' && e.userConfirmed !== true),
+  );
+  const expenseTotal = confirmedExpenses.reduce(
     (s: number, e: any) => s + Number(e.amount),
     0,
   );
-
   const firstSegment = trip.segments.find(
     (s: any) => s.departureUtc,
   );
@@ -172,11 +174,11 @@ export default async function TripPage({
               ? money(budgetTotal, budget[0].currency)
               : 'Not set'}
           </h2>
-          <p className="mt-1 text-sm text-muted-foreground">
+                   <p className="mt-1 text-sm text-muted-foreground">
             Recorded spend:{' '}
-            {expensePage.items.length
-              ? money(expenseTotal, expensePage.items[0].currency)
-              : 'No expenses'}
+            {confirmedExpenses.length
+              ? money(expenseTotal, confirmedExpenses[0].currency)
+              : 'No confirmed expenses'}
           </p>
         </div>
 
