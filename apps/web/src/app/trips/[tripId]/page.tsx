@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { getTrip, getRightNow, getTimeline } from '@/lib/domain/trips';
+import { getTripForViewer, getRightNow, getTimeline } from '@/lib/domain/trips';
 import { getBudget } from '@/lib/domain/budget';
 import { listExpenses } from '@/lib/domain/expenses';
 import { listDocuments } from '@/lib/domain/documents';
@@ -46,8 +46,12 @@ export default async function TripPage({
 }) {
   const a = await getActorContext();
   const { tripId } = await params;
-  const trip = await getTrip(tripId, a.tenantId);
-  if (trip.ownerTravelerId !== a.travelerId) throw new Error('FORBIDDEN');
+
+  const { trip, viewer } = await getTripForViewer(
+    tripId,
+    a.tenantId,
+    a.travelerId,
+  );
 
   await recordEvent(db, {
     tenantId: a.tenantId,
@@ -56,7 +60,7 @@ export default async function TripPage({
     actorType: 'USER',
     actorId: a.actorId,
     behavioralClass: 'RETRIEVAL',
-    payload: { source: 'wallet' },
+    payload: { source: 'wallet', isOwner: viewer.isOwner },
   });
 
   const [
@@ -129,6 +133,14 @@ export default async function TripPage({
             ← Wallets
           </Link>
           <div className="flex items-center gap-2">
+            {!viewer.isOwner && (
+              <span
+                className="rounded-full px-3 py-1 text-xs font-medium"
+                style={{ background: '#fef3c7', color: '#92400e' }}
+              >
+                Read-only · participant
+              </span>
+            )}
             <span className="rounded-full bg-secondary px-3 py-1 text-xs font-medium text-secondary-foreground">
               {trip.status}
             </span>
@@ -231,15 +243,6 @@ export default async function TripPage({
                       </ul>
                     </div>
                   )}
-
-                  {d.affectedSegments.length === 0 &&
-                    d.affectedExpenses.length === 0 &&
-                    d.affectedConflicts.length === 0 && (
-                      <p className="mt-2 text-sm text-muted-foreground">
-                        No downstream segments, expenses, or conflicts are
-                        linked to this booking.
-                      </p>
-                    )}
                 </div>
               ))}
             </div>
@@ -324,19 +327,27 @@ export default async function TripPage({
                     {s.supplierName ? ` · ${s.supplierName}` : ''}
                   </strong>
                   <div className="flex shrink-0 items-center gap-2">
-                    <SegmentStatusControl
-                      tripId={tripId}
-                      segmentId={s.segmentId}
-                      currentStatus={String(s.status)}
-                      rowVersion={s.rowVersion}
-                    />
-                    <SegmentDeleteButton
-                      tripId={tripId}
-                      segmentId={s.segmentId}
-                      label={`${s.segmentType ?? 'Segment'}${
-                        s.supplierName ? ` — ${s.supplierName}` : ''
-                      }`}
-                    />
+                    {viewer.canEdit ? (
+                      <SegmentStatusControl
+                        tripId={tripId}
+                        segmentId={s.segmentId}
+                        currentStatus={String(s.status)}
+                        rowVersion={s.rowVersion}
+                      />
+                    ) : (
+                      <span className="rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-secondary-foreground">
+                        {s.status}
+                      </span>
+                    )}
+                    {viewer.canEdit && (
+                      <SegmentDeleteButton
+                        tripId={tripId}
+                        segmentId={s.segmentId}
+                        label={`${s.segmentType ?? 'Segment'}${
+                          s.supplierName ? ` — ${s.supplierName}` : ''
+                        }`}
+                      />
+                    )}
                   </div>
                 </div>
                 <div className="mt-2 text-sm text-muted-foreground">
@@ -499,32 +510,36 @@ export default async function TripPage({
         </div>
       </section>
 
-      <div className="mx-auto max-w-6xl px-6 pb-16">
-        <TripActions
-          tripId={tripId}
-          segments={trip.segments.map((s: any) => ({
-            segmentId: s.segmentId,
-            rowVersion: s.rowVersion,
-            segmentType: s.segmentType,
-            supplierName: s.supplierName,
-            bookingReference: s.bookingReference,
-            departureLocal: s.departureLocal,
-            arrivalLocal: s.arrivalLocal,
-            departureLocation: s.departureLocation,
-            arrivalLocation: s.arrivalLocation,
-            status: s.status,
-          }))}
-          budgetRows={budget}
-        />
-      </div>
+      {viewer.canEdit && (
+        <div className="mx-auto max-w-6xl px-6 pb-16">
+          <TripActions
+            tripId={tripId}
+            segments={trip.segments.map((s: any) => ({
+              segmentId: s.segmentId,
+              rowVersion: s.rowVersion,
+              segmentType: s.segmentType,
+              supplierName: s.supplierName,
+              bookingReference: s.bookingReference,
+              departureLocal: s.departureLocal,
+              arrivalLocal: s.arrivalLocal,
+              departureLocation: s.departureLocation,
+              arrivalLocation: s.arrivalLocation,
+              status: s.status,
+            }))}
+            budgetRows={budget}
+          />
+        </div>
+      )}
 
-      <div className="mx-auto max-w-6xl px-6 pb-16">
-        <DeleteTripButton
-          tripId={trip.tripId}
-          tripTitle={trip.title ?? 'Untitled trip'}
-          rowVersion={trip.rowVersion}
-        />
-      </div>
+      {viewer.canEdit && (
+        <div className="mx-auto max-w-6xl px-6 pb-16">
+          <DeleteTripButton
+            tripId={trip.tripId}
+            tripTitle={trip.title ?? 'Untitled trip'}
+            rowVersion={trip.rowVersion}
+          />
+        </div>
+      )}
     </div>
   );
 }

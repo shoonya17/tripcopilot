@@ -50,6 +50,53 @@ export async function getTrip(tripId: string, tenantId: string) {
   return trip;
 }
 
+/**
+ * Like getTrip, but authorization is "owner OR active participant."
+ * Returns the trip plus a `viewer` object indicating what the caller can do.
+ * Only the owner can edit; participants see read-only.
+ */
+export async function getTripForViewer(
+  tripId: string,
+  tenantId: string,
+  travelerId: string,
+) {
+  const trip = await db.trip.findFirst({
+    where: { tripId, tenantId },
+    include: {
+      owner: true,
+      segments: { orderBy: { departureUtc: 'asc' } },
+      documents: { orderBy: { receivedAt: 'desc' } },
+      budgets: true,
+      expenses: { orderBy: { incurredAt: 'desc' } },
+      preferences: true,
+      conflicts: { orderBy: { createdAt: 'desc' } },
+      group: { include: { participants: true } },
+      consents: true,
+    },
+  });
+  if (!trip) throw new Error('NOT_FOUND: trip');
+
+  const isOwner = trip.ownerTravelerId === travelerId;
+
+  let isParticipant = false;
+  if (!isOwner && trip.group) {
+    isParticipant = trip.group.participants.some(
+      p => p.travelerId === travelerId && p.status === 'ACTIVE',
+    );
+  }
+
+  if (!isOwner && !isParticipant) throw new Error('FORBIDDEN');
+
+  return {
+    trip,
+    viewer: {
+      isOwner,
+      isParticipant,
+      canEdit: isOwner,
+    },
+  };
+}
+
 export async function updateTrip(tripId: string, tenantId: string, actorId: string, rowVersion: number, patch: Record<string, unknown>) {
   if (!Number.isInteger(rowVersion) || rowVersion < 1) throw new Error('VALIDATION: row_version required');
   const trip = await db.trip.findFirst({ where: { tripId, tenantId } });

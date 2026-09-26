@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Plus, Save, MapPin, UserPlus, ShieldCheck, ShieldOff } from 'lucide-react';
+import { Plus, Save, MapPin, ShieldCheck, ShieldOff } from 'lucide-react';
 
 function key() {
   return crypto.randomUUID();
@@ -103,7 +103,6 @@ export default function TripActions({
   const [version, setVersion] = useState(segments[0]?.rowVersion ?? 1);
   const [pref, setPref] = useState({ key: '', value: '' });
   const [consent, setConsent] = useState<any>(null);
-  const [participant, setParticipant] = useState('');
   const [share, setShare] = useState({ lat: '', long: '', accuracy: '50' });
 
   const selectedSegment = segments.find(s => s.segmentId === selected);
@@ -311,60 +310,6 @@ export default function TripActions({
             <Save className="size-4" />
             Save preference
           </Button>
-        </div>
-      </Card>
-
-      {/* GROUP TRAVEL */}
-      <Card title="Group travel">
-        <div>
-          <Button
-            variant="outline"
-            onClick={() =>
-              flash(async () =>
-                request(`/api/v1/trips/${tripId}/group`, {
-                  method: 'POST',
-                  headers: { 'Idempotency-Key': key() },
-                  body: '{}',
-                }),
-              )
-            }
-          >
-            <Plus className="size-4" />
-            Create / open group
-          </Button>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div>
-            <Label>Participant traveler ID</Label>
-            <Input
-              value={participant}
-              onChange={e => setParticipant(e.target.value)}
-              placeholder="UUID"
-            />
-          </div>
-          <div className="flex items-end">
-            <Button
-              variant="outline"
-              disabled={!participant}
-              onClick={() =>
-                flash(async () =>
-                  request(
-                    `/api/v1/trips/${tripId}/group/participants`,
-                    {
-                      method: 'POST',
-                      headers: { 'Idempotency-Key': key() },
-                      body: JSON.stringify({
-                        traveler_id: participant,
-                      }),
-                    },
-                  ),
-                )
-              }
-            >
-              <UserPlus className="size-4" />
-              Add participant
-            </Button>
-          </div>
         </div>
       </Card>
 
