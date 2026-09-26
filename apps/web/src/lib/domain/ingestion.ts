@@ -795,7 +795,7 @@ export async function processIngestion(
             });
           }
 
-          if (s.fare_amount && s.fare_currency) {
+                if (s.fare_amount && s.fare_currency) {
             const amount = Number(s.fare_amount);
             const currency = String(s.fare_currency).toUpperCase();
             if (
@@ -803,40 +803,58 @@ export async function processIngestion(
               amount > 0 &&
               /^[A-Z]{3}$/.test(currency)
             ) {
-              const segmentIndex = extraction.segments.indexOf(s);
-              const fareMeta =
-                extractionResult.fieldMeta[
-                  `segments.${segmentIndex}.fare_amount`
-                ];
-              const incurredAt = s.departure_local
-                ? new Date(
-                    `${String(s.departure_local).replace(/Z$/, '')}Z`,
-                  )
-                : new Date();
-              await tx.expense.create({
-                data: {
+              const merchantOrDescription = s.supplier_name
+                ? `${s.supplier_name} fare`
+                : `${s.segment_type ?? 'Segment'} fare`;
+
+              // Dedup: don't create a second pending expense for the same
+              // trip + supplier + amount + currency. Prevents double-counting
+              // when the same booking is uploaded twice via different
+              // documents (different content hash → different segment).
+              const existingFare = await tx.expense.findFirst({
+                where: {
                   tenantId,
                   tripId: trip.tripId,
-                  travelerId: ingestion.travelerId ?? undefined,
+                  sourceType: 'EXTRACTED_FARE',
                   amount: amount.toFixed(4),
                   currency,
-                  merchantOrDescription: s.supplier_name
-                    ? `${s.supplier_name} fare`
-                    : `${s.segment_type ?? 'Segment'} fare`,
-                  incurredAt,
-                  location: s.departure_location ?? null,
-                  source: 'DOCUMENT',
-                  sourceType: 'EXTRACTED_FARE',
-                  confidence:
-                    typeof fareMeta?.confidence === 'number'
-                      ? fareMeta.confidence
-                      : null,
-                  userConfirmed: false,
+                  merchantOrDescription,
                 },
               });
+
+              if (!existingFare) {
+                const segmentIndex = extraction.segments.indexOf(s);
+                const fareMeta =
+                  extractionResult.fieldMeta[
+                    `segments.${segmentIndex}.fare_amount`
+                  ];
+                const incurredAt = s.departure_local
+                  ? new Date(
+                      `${String(s.departure_local).replace(/Z$/, '')}Z`,
+                    )
+                  : new Date();
+                await tx.expense.create({
+                  data: {
+                    tenantId,
+                    tripId: trip.tripId,
+                    travelerId: ingestion.travelerId ?? undefined,
+                    amount: amount.toFixed(4),
+                    currency,
+                    merchantOrDescription,
+                    incurredAt,
+                    location: s.departure_location ?? null,
+                    source: 'DOCUMENT',
+                    sourceType: 'EXTRACTED_FARE',
+                    confidence:
+                      typeof fareMeta?.confidence === 'number'
+                        ? fareMeta.confidence
+                        : null,
+                    userConfirmed: false,
+                  },
+                });
+              }
             }
           }
-
           await tx.dedupDecision.create({
             data: {
               tenantId,

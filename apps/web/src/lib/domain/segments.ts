@@ -1,6 +1,7 @@
 import { db } from '../db';
 import { recordEvent } from '../events';
 import { recordAudit } from '../audit';
+import { recomputeTripRelations } from './derived';
 
 export async function deleteSegment(
   tripId: string,
@@ -73,6 +74,11 @@ export async function deleteSegment(
       },
     });
   });
+
+  // Re-run conflict detection and connection inference. Without this,
+  // a conflict created when more segments existed stays in the wallet
+  // even after the segments it referenced are deleted.
+  await recomputeTripRelations(tripId, tenantId);
 
   return { segmentId, deleted: true };
 }
