@@ -16,7 +16,7 @@ export default function DeleteTripButton({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
-  async function confirmDelete() {
+  async function confirmArchive() {
     setBusy(true);
     setError('');
     try {
@@ -27,12 +27,12 @@ export default function DeleteTripButton({
       });
       const body = await r.json().catch(() => ({}));
       if (!r.ok) {
-        throw new Error(body?.error?.message ?? `Delete failed (${r.status})`);
+        throw new Error(body?.error?.message ?? `Archive failed (${r.status})`);
       }
       router.push('/');
       router.refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Delete failed');
+      setError(e instanceof Error ? e.message : 'Archive failed');
       setBusy(false);
     }
   }
@@ -44,7 +44,7 @@ export default function DeleteTripButton({
         onClick={() => setOpen(true)}
         style={{ color: '#b91c1c' }}
       >
-        Delete trip
+        Archive trip
       </button>
     );
   }
@@ -54,19 +54,19 @@ export default function DeleteTripButton({
       className="card"
       style={{ borderColor: '#fecaca', background: '#fff7f7' }}
     >
-      <strong>Delete this trip?</strong>
+      <strong>Archive this trip?</strong>
       <p className="small muted" style={{ marginTop: 4 }}>
-        &ldquo;{tripTitle}&rdquo; will be archived and hidden from your home
-        page. The record is kept for audit, but you won&apos;t see it again.
+        &ldquo;{tripTitle}&rdquo; will be hidden from your home page. You can
+        restore it later from the archive, or delete it permanently.
       </p>
       <div className="actions" style={{ marginTop: 12 }}>
         <button
           className="btn"
-          onClick={confirmDelete}
+          onClick={confirmArchive}
           disabled={busy}
           style={{ background: '#dc2626' }}
         >
-          {busy ? 'Deleting…' : 'Yes, delete'}
+          {busy ? 'Archiving…' : 'Yes, archive'}
         </button>
         <button
           className="btn secondary"
