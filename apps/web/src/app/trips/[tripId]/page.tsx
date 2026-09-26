@@ -7,10 +7,12 @@ import { listConflicts } from '@/lib/domain/conflicts';
 import { getSafety } from '@/lib/domain/safety';
 import { getGroup } from '@/lib/domain/group';
 import { getEffectivePreferences } from '@/lib/domain/preferences';
+import { getDisruptionSummary } from '@/lib/domain/disruption';
 import { getActorContext } from '@/lib/auth';
 import TripActions from '@/components/TripActions';
-import SegmentDeleteButton from '@/components/SegmentDeleteButton';
 import DeleteTripButton from '@/components/DeleteTripButton';
+import SegmentDeleteButton from '@/components/SegmentDeleteButton';
+import SegmentStatusControl from '@/components/SegmentStatusControl';
 import { recordEvent } from '@/lib/events';
 import { db } from '@/lib/db';
 import { Button } from '@/components/ui/button';
@@ -19,16 +21,22 @@ function money(amount: unknown, currency: string) {
   return `${currency} ${Number(amount).toFixed(2)}`;
 }
 
-function date(
-  value: Date | null | undefined,
-  timezone?: string | null,
-) {
+function date(value: Date | null | undefined, timezone?: string | null) {
   if (!value) return '—';
   return new Intl.DateTimeFormat('en-GB', {
     dateStyle: 'medium',
     timeStyle: 'short',
     timeZone: timezone || undefined,
   }).format(value);
+}
+
+function isoDate(value: string | null | undefined): string {
+  if (!value) return '—';
+  return new Intl.DateTimeFormat('en-GB', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: 'UTC',
+  }).format(new Date(value));
 }
 
 export default async function TripPage({
@@ -61,6 +69,7 @@ export default async function TripPage({
     safety,
     group,
     preferences,
+    disruptionSummary,
   ] = await Promise.all([
     getRightNow(tripId, a.tenantId),
     getTimeline(tripId, a.tenantId, a.actorId),
@@ -71,22 +80,22 @@ export default async function TripPage({
     getSafety(tripId, a.tenantId),
     getGroup(tripId, a.tenantId),
     getEffectivePreferences(tripId, a.tenantId, a.travelerId),
+    getDisruptionSummary(tripId, a.tenantId),
   ]);
 
   const budgetTotal = budget.reduce(
     (s: number, b: any) => s + Number(b.plannedAmount),
     0,
   );
-   const confirmedExpenses = expensePage.items.filter(
+  const confirmedExpenses = expensePage.items.filter(
     (e: any) => !(e.sourceType === 'EXTRACTED_FARE' && e.userConfirmed !== true),
   );
   const expenseTotal = confirmedExpenses.reduce(
     (s: number, e: any) => s + Number(e.amount),
     0,
   );
-  const firstSegment = trip.segments.find(
-    (s: any) => s.departureUtc,
-  );
+
+  const firstSegment = trip.segments.find((s: any) => s.departureUtc);
   const lastSegment = [...trip.segments]
     .reverse()
     .find((s: any) => s.arrivalUtc);
@@ -145,6 +154,99 @@ export default async function TripPage({
         </p>
       </section>
 
+      {disruptionSummary.hasDisruption && (
+        <section className="mx-auto max-w-6xl px-6 pb-6">
+          <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-5">
+            <h2 className="text-base font-semibold text-destructive">
+              ⚠ Disruption on this trip
+            </h2>
+            <div className="mt-4 space-y-6">
+              {disruptionSummary.disruptions.map(d => (
+                <div key={d.segment.segmentId}>
+                  <p className="text-sm font-medium">
+                    {d.segment.segmentType}
+                    {d.segment.supplierName
+                      ? ` · ${d.segment.supplierName}`
+                      : ''}
+                    {' — '}
+                    <span className="text-destructive">{d.status}</span>
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {d.segment.departureLocation ?? '—'} →{' '}
+                    {d.segment.arrivalLocation ?? '—'}
+                    {d.segment.departureUtc
+                      ? ` · ${isoDate(d.segment.departureUtc)}`
+                      : ''}
+                  </p>
+
+                  {d.affectedSegments.length > 0 && (
+                    <div className="mt-3">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Downstream segments affected: {d.affectedSegments.length}
+                      </p>
+                      <ul className="mt-1 list-disc pl-5 text-sm text-muted-foreground">
+                        {d.affectedSegments.map(s => (
+                          <li key={s.segmentId}>
+                            <span className="font-medium">
+                              {s.segmentType}
+                              {s.supplierName ? ` · ${s.supplierName}` : ''}
+                            </span>{' '}
+                            — {s.reason}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {d.affectedExpenses.length > 0 && (
+                    <div className="mt-3">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Expenses linked to this booking: {d.affectedExpenses.length}
+                      </p>
+                      <ul className="mt-1 list-disc pl-5 text-sm text-muted-foreground">
+                        {d.affectedExpenses.map(e => (
+                          <li key={e.expenseId}>
+                            <span className="font-medium">
+                              {e.currency} {Number(e.amount).toFixed(2)}
+                            </span>{' '}
+                            · {e.merchantOrDescription} — {e.reason}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {d.affectedConflicts.length > 0 && (
+                    <div className="mt-3">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Current conflicts triggered: {d.affectedConflicts.length}
+                      </p>
+                      <ul className="mt-1 list-disc pl-5 text-sm text-muted-foreground">
+                        {d.affectedConflicts.map(c => (
+                          <li key={c.conflictId}>
+                            <span className="font-medium">{c.conflictType}</span>
+                            {c.summary ? ` · ${c.summary}` : ''}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {d.affectedSegments.length === 0 &&
+                    d.affectedExpenses.length === 0 &&
+                    d.affectedConflicts.length === 0 && (
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        No downstream segments, expenses, or conflicts are
+                        linked to this booking.
+                      </p>
+                    )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
       <section className="mx-auto grid max-w-6xl gap-4 px-6 sm:grid-cols-2 lg:grid-cols-3">
         <div className="rounded-xl border border-border bg-card p-5">
           <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -175,7 +277,7 @@ export default async function TripPage({
               ? money(budgetTotal, budget[0].currency)
               : 'Not set'}
           </h2>
-                   <p className="mt-1 text-sm text-muted-foreground">
+          <p className="mt-1 text-sm text-muted-foreground">
             Recorded spend:{' '}
             {confirmedExpenses.length
               ? money(expenseTotal, confirmedExpenses[0].currency)
@@ -193,12 +295,7 @@ export default async function TripPage({
           <p className="mt-1 text-sm text-muted-foreground">
             Generated from canonical trip data. No live monitoring.
           </p>
-          <Button
-            asChild
-            variant="outline"
-            size="sm"
-            className="mt-3"
-          >
+          <Button asChild variant="outline" size="sm" className="mt-3">
             <Link href={`/trips/${tripId}/briefing`}>
               Open briefing
             </Link>
@@ -221,15 +318,18 @@ export default async function TripPage({
                 key={s.segmentId}
                 className="rounded-lg border border-border bg-muted/30 p-4"
               >
-                                <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start justify-between gap-3">
                   <strong className="text-sm font-semibold">
                     {s.segmentType}
                     {s.supplierName ? ` · ${s.supplierName}` : ''}
                   </strong>
                   <div className="flex shrink-0 items-center gap-2">
-                    <span className="rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-secondary-foreground">
-                      {s.status}
-                    </span>
+                    <SegmentStatusControl
+                      tripId={tripId}
+                      segmentId={s.segmentId}
+                      currentStatus={String(s.status)}
+                      rowVersion={s.rowVersion}
+                    />
                     <SegmentDeleteButton
                       tripId={tripId}
                       segmentId={s.segmentId}
@@ -286,8 +386,7 @@ export default async function TripPage({
 
         <div className="rounded-xl border border-border bg-card p-5">
           <h2 className="text-base font-semibold">Conflicts</h2>
-          {conflicts.filter((c: any) => c.status !== 'RESOLVED')
-            .length === 0 ? (
+          {conflicts.filter((c: any) => c.status !== 'RESOLVED').length === 0 ? (
             <p className="mt-2 text-sm text-muted-foreground">
               No active conflicts detected.
             </p>
@@ -302,9 +401,7 @@ export default async function TripPage({
                     className="rounded-lg border border-destructive/20 bg-destructive/5 p-3"
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <strong className="text-sm">
-                        {c.conflictType}
-                      </strong>
+                      <strong className="text-sm">{c.conflictType}</strong>
                       <span className="shrink-0 rounded-full bg-secondary px-2 py-0.5 text-xs">
                         {c.status}
                       </span>
@@ -329,15 +426,8 @@ export default async function TripPage({
           <p className="mt-1 text-sm text-muted-foreground">
             Location shares: {safety.shares.length}
           </p>
-          <Button
-            asChild
-            variant="outline"
-            size="sm"
-            className="mt-3"
-          >
-            <Link href={`/trips/${tripId}/safety`}>
-              Safety controls
-            </Link>
+          <Button asChild variant="outline" size="sm" className="mt-3">
+            <Link href={`/trips/${tripId}/safety`}>Safety controls</Link>
           </Button>
         </div>
       </section>
@@ -366,15 +456,8 @@ export default async function TripPage({
               ))}
             </div>
           )}
-          <Button
-            asChild
-            variant="outline"
-            size="sm"
-            className="mt-3"
-          >
-            <Link href={`/trips/${tripId}/expenses`}>
-              Expense details
-            </Link>
+          <Button asChild variant="outline" size="sm" className="mt-3">
+            <Link href={`/trips/${tripId}/expenses`}>Expense details</Link>
           </Button>
         </div>
 
@@ -385,15 +468,8 @@ export default async function TripPage({
               ? `${group.participants.length} participant(s)`
               : 'No group created'}
           </p>
-          <Button
-            asChild
-            variant="outline"
-            size="sm"
-            className="mt-3"
-          >
-            <Link href={`/trips/${tripId}/group`}>
-              Group controls
-            </Link>
+          <Button asChild variant="outline" size="sm" className="mt-3">
+            <Link href={`/trips/${tripId}/group`}>Group controls</Link>
           </Button>
         </div>
 
