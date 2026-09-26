@@ -18,6 +18,25 @@ function localDateInTimeZone(date: Date, timeZone: string) {
   return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
+/**
+ * The DB stores `departureLocal` as a Date whose UTC wall-clock equals the
+ * local wall-clock (e.g. 2026-09-29T17:00Z represents 17:00 IST). We want
+ * to hand the AI that wall-clock string plus the timezone name, so it
+ * describes the trip in the traveller's local time, not UTC.
+ */
+function localWallClock(value: Date | null | undefined): string | null {
+  if (!value) return null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  // Force UTC rendering so the stored wall-clock comes out unchanged
+  const yyyy = d.getUTCFullYear();
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  const hh = String(d.getUTCHours()).padStart(2, '0');
+  const mi = String(d.getUTCMinutes()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
+}
+
 export type BriefingKind = 'morning' | 'evening' | 'pretrip_t24';
 
 export async function generateBriefing(
@@ -35,8 +54,6 @@ export async function generateBriefing(
   });
   if (!trip) throw new Error('NOT_FOUND: trip');
 
-  // Briefings are available for PLANNED and ACTIVE trips.
-  // Blocked for CANCELLED, ARCHIVED, and COMPLETED (post-trip is out of Phase 1).
   if (
     trip.status === 'CANCELLED' ||
     trip.status === 'ARCHIVED' ||
@@ -68,12 +85,18 @@ export async function generateBriefing(
     title: trip.title,
     travelDate: dateKey,
     slot: kind,
+    timezone: tz,
+    tripStartLocal: localWallClock(trip.startAt),
+    tripEndLocal: localWallClock(trip.endAt),
     nextSegment: next
       ? {
           supplier: next.supplierName,
           from: next.departureLocation,
           to: next.arrivalLocation,
-          departure: next.departureUtc?.toISOString(),
+          departureLocal: localWallClock(next.departureLocal),
+          departureTimezone: next.departureTimezone,
+          arrivalLocal: localWallClock(next.arrivalLocal),
+          arrivalTimezone: next.arrivalTimezone,
           reference: next.bookingReference,
         }
       : null,
@@ -82,8 +105,10 @@ export async function generateBriefing(
       supplier: s.supplierName,
       from: s.departureLocation,
       to: s.arrivalLocation,
-      departure: s.departureUtc?.toISOString(),
-      arrival: s.arrivalUtc?.toISOString(),
+      departureLocal: localWallClock(s.departureLocal),
+      departureTimezone: s.departureTimezone,
+      arrivalLocal: localWallClock(s.arrivalLocal),
+      arrivalTimezone: s.arrivalTimezone,
     })),
   };
 
