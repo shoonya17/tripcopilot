@@ -216,9 +216,17 @@ export default async function HomePage() {
             <MapPin className="size-5 text-primary" />
             <span className="text-lg font-semibold">Trip Copilot</span>
           </div>
-          <span className="rounded-full bg-secondary px-3 py-1 text-xs font-medium text-secondary-foreground">
-            End-to-end v1
-          </span>
+          <div className="flex items-center gap-3">
+            <Link
+              href="/archive"
+              className="text-sm text-muted-foreground hover:text-foreground"
+            >
+              Archive
+            </Link>
+            <span className="rounded-full bg-secondary px-3 py-1 text-xs font-medium text-secondary-foreground">
+              End-to-end v1
+            </span>
+          </div>
         </div>
       </nav>
 

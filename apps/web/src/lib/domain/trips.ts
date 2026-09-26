@@ -138,3 +138,83 @@ export async function archiveTrip(
 
   return row;
 }
+
+export async function restoreTrip(
+  tripId: string,
+  tenantId: string,
+  actorId: string,
+) {
+  const trip = await db.trip.findFirst({ where: { tripId, tenantId } });
+  if (!trip) throw new Error('NOT_FOUND: trip');
+  if (trip.ownerTravelerId !== actorId) throw new Error('FORBIDDEN');
+  if (trip.status !== 'ARCHIVED') {
+    throw new Error('CONFLICT: trip is not archived');
+  }
+
+  const updated = await db.trip.update({
+    where: { tripId },
+    data: { status: 'PLANNED', rowVersion: { increment: 1 } },
+  });
+
+  await db.$transaction(async (tx) => {
+    await recordAudit(tx, {
+      tenantId,
+      tripId,
+      actorType: 'USER',
+      actorId,
+      action: 'TRIP_RESTORED',
+      entityType: 'TRIP',
+      entityId: tripId,
+      metadata: {},
+    });
+    await recordEvent(tx, {
+      tenantId,
+      tripId,
+      eventName: 'TRIP_RESTORED',
+      actorType: 'USER',
+      actorId,
+      payload: {},
+    });
+  });
+
+  return updated;
+}
+
+export async function deleteTripPermanently(
+  tripId: string,
+  tenantId: string,
+  actorId: string,
+) {
+  const trip = await db.trip.findFirst({ where: { tripId, tenantId } });
+  if (!trip) throw new Error('NOT_FOUND: trip');
+  if (trip.ownerTravelerId !== actorId) throw new Error('FORBIDDEN');
+  if (trip.status !== 'ARCHIVED') {
+    throw new Error(
+      'CONFLICT: only archived trips can be permanently deleted',
+    );
+  }
+
+  // All Trip relations have onDelete: Cascade in the schema.
+  // A single delete call removes segments, expenses, documents,
+  // conflicts, connections, provenance, audit and event rows.
+  await db.trip.delete({ where: { tripId } });
+
+  return { tripId, deleted: true };
+}
+
+export async function listArchivedTrips(
+  tenantId: string,
+  travelerId: string,
+) {
+  return db.trip.findMany({
+    where: {
+      tenantId,
+      ownerTravelerId: travelerId,
+      status: 'ARCHIVED',
+    },
+    include: {
+      segments: { orderBy: { departureUtc: 'asc' } },
+    },
+    orderBy: { updatedAt: 'desc' },
+  });
+}
