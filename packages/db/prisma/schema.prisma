@@ -112,6 +112,7 @@ model Traveler {
   phone            String?
   locale           String?
   defaultTimezone  String?         @map("default_timezone")
+  ingestEmailToken String?         @unique @map("ingest_email_token")
   createdAt        DateTime        @default(now()) @map("created_at")
   updatedAt        DateTime        @updatedAt @map("updated_at")
   rowVersion       Int             @default(1) @map("row_version")

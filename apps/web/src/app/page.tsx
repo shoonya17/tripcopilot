@@ -218,6 +218,12 @@ export default async function HomePage() {
           </div>
           <div className="flex items-center gap-3">
             <Link
+              href="/settings"
+              className="text-sm text-muted-foreground hover:text-foreground"
+            >
+              Settings
+            </Link>
+            <Link
               href="/archive"
               className="text-sm text-muted-foreground hover:text-foreground"
             >
