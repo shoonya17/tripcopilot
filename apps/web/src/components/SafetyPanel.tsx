@@ -11,7 +11,7 @@ async function request(path: string, init: RequestInit = {}) {
 
 type Consent = { status: string; consentId?: string } | null;
 
-export default function SafetyPanel({ tripId, initialConsent, contacts }: { tripId: string; initialConsent: Consent; contacts: any[] }) {
+export default function SafetyPanel({ tripId, initialConsent }: { tripId: string; initialConsent: Consent }) {
   const [consent, setConsent] = useState<Consent>(initialConsent);
   const [share, setShare] = useState({ lat: '', long: '', accuracy: '50' });
   const [message, setMessage] = useState('');
@@ -36,7 +36,7 @@ export default function SafetyPanel({ tripId, initialConsent, contacts }: { trip
         <p className="muted">
           {granted
             ? 'Safety features are enabled. You can share your location once below.'
-            : 'Safety features are off. Grant consent to enable one-time location share and trusted contacts.'}
+            : 'Safety features are off. Grant consent to enable one-time location share.'}
         </p>
         <div className="actions" style={{ marginTop: 12 }}>
           <button className="btn" disabled={busy || granted} onClick={() => flash(async () => {
@@ -75,18 +75,6 @@ export default function SafetyPanel({ tripId, initialConsent, contacts }: { trip
           });
         })}>Share location once</button>
         {!granted && <p className="small muted" style={{ marginTop: 8 }}>Grant consent above to enable this.</p>}
-      </div>
-
-      <div className="card">
-        <h2 className="section-title">Trusted contacts</h2>
-        {contacts.length === 0
-          ? <p className="muted">No trusted contacts yet. Add them from the Trip Wallet.</p>
-          : <div className="list">{contacts.map((c: any) => (
-              <div className="row" key={c.contactId ?? c.id}>
-                <span>{c.name ?? c.email ?? c.contactId}</span>
-                <span className="pill">{c.relationship ?? c.role ?? ''}</span>
-              </div>
-            ))}</div>}
       </div>
 
       {(message || error) && (

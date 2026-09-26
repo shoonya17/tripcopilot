@@ -2,11 +2,13 @@ import Link from 'next/link';
 import { getActorContext } from '@/lib/auth';
 import { getSafety } from '@/lib/domain/safety';
 import { getTrip } from '@/lib/domain/trips';
+import { listTrustedContacts } from '@/lib/domain/trustedContacts';
 import SafetyPanel from '@/components/SafetyPanel';
 import SafetyBrief from '@/components/SafetyBrief';
 import EmergencyInfo from '@/components/EmergencyInfo';
 import OfflineItinerary from '@/components/OfflineItinerary';
 import ShareLocationButton from '@/components/ShareLocationButton';
+import TrustedContactsPanel from '@/components/TrustedContactsPanel';
 
 export default async function SafetyPage({
   params,
@@ -15,11 +17,12 @@ export default async function SafetyPage({
 }) {
   const a = await getActorContext();
   const { tripId } = await params;
-  const [safety, trip] = await Promise.all([
+
+  const [safety, trip, contacts] = await Promise.all([
     getSafety(tripId, a.tenantId),
     getTrip(tripId, a.tenantId),
+    listTrustedContacts(a.travelerId, a.tenantId),
   ]);
-  const contacts = Array.isArray(safety.contacts) ? safety.contacts : [];
 
   const segments = (trip.segments ?? []).map((s: any) => ({
     segmentId: s.segmentId,
@@ -42,6 +45,13 @@ export default async function SafetyPage({
   ].filter(Boolean);
 
   const consentGranted = safety.consent?.status === 'GRANTED';
+
+  const contactRows = contacts.map(c => ({
+    trustedContactId: c.trustedContactId,
+    name: c.name,
+    contactType: c.contactType,
+    contactValue: c.contactValue,
+  }));
 
   return (
     <main className="shell">
@@ -75,10 +85,11 @@ export default async function SafetyPage({
         segments={segments}
       />
 
+      <TrustedContactsPanel initialContacts={contactRows} />
+
       <SafetyPanel
         tripId={tripId}
         initialConsent={safety.consent ?? null}
-        contacts={contacts}
       />
     </main>
   );
